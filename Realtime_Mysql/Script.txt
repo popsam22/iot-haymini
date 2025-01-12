@@ -1,0 +1,10 @@
+
+
+CREATE TABLE `tblt_timesheet` (
+ `timesheetid` int(11) NOT NULL AUTO_INCREMENT,
+ `punchingcode` decimal(11,0) NOT NULL,
+ `date` date DEFAULT NULL,
+ `time` time DEFAULT NULL,
+ `Tid` varchar(50) COLLATE utf8mb4_bin DEFAULT NULL,
+ PRIMARY KEY (`timesheetid`)
+) ENGINE=InnoDB AUTO_INCREMENT=105 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
