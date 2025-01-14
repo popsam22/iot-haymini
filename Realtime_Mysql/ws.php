@@ -6,21 +6,49 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 error_reporting(E_ALL);
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogs') {
-    header('Content-Type: application/json');
-    echo getAllLogs();
-    exit();
+// if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogs') {
+//     header('Content-Type: application/json');
+//     echo getAllLogs();
+//     exit();
+// }
+
+// if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogsByPunchingCode' && isset($_GET['punchingcode'])) {
+//     header('Content-Type: application/json');
+//     echo getLogsByPunchingCode($_GET['punchingcode']);
+//     exit(); 
+// }
+
+// if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'exportLogs') {
+//     exportLogsToExcel();
+// }
+
+// Check if the script is running in CLI or via HTTP
+if (php_sapi_name() == "cli") {
+    // For CLI: Use getopt() or $argv to simulate $_GET parameters
+    $options = getopt("", ["action:", "punchingcode:"]);
+    $_GET = $options; // Simulate $_GET
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogsByPunchingCode' && isset($_GET['punchingcode'])) {
-    header('Content-Type: application/json');
-    echo getLogsByPunchingCode($_GET['punchingcode']);
-    exit(); 
+// Process HTTP requests (for web server environment)
+if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() == "cli") {
+
+    if (isset($_GET['action']) && $_GET['action'] === 'getLogs') {
+        header('Content-Type: application/json');
+        echo getAllLogs();
+        exit();
+    }
+
+    if (isset($_GET['action']) && $_GET['action'] === 'getLogsByPunchingCode' && isset($_GET['punchingcode'])) {
+        header('Content-Type: application/json');
+        echo getLogsByPunchingCode($_GET['punchingcode']);
+        exit();
+    }
+
+    if (isset($_GET['action']) && $_GET['action'] === 'exportLogs') {
+        exportLogsToExcel();
+    }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'exportLogs') {
-    exportLogsToExcel();
-}
 
 
 set_time_limit(0);
