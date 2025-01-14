@@ -1,5 +1,5 @@
 <?php
-define('SERVER_IP', '192.168.8.101');
+define('SERVER_IP', '54.227.34.102');
 // define('SERVER_IP', '172.20.10.5');
 define('SERVER_PORT', '7788');
 // define('MYSQL_HOST', 'localhost');
