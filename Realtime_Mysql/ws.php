@@ -11,21 +11,47 @@ $dotenv = Dotenv::createImmutable(__DIR__. '/../');
 $dotenv->load();
 error_reporting(E_ALL);
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogs') {
-    header('Content-Type: application/json');
-    echo getAllLogs();
-    exit();
+if (php_sapi_name() === "cli") {
+    // Simulate $_GET for CLI
+    $options = getopt("", ["action:", "punchingcode:"]);
+    $_GET = $options ?: [];
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogsByPunchingCode' && isset($_GET['punchingcode'])) {
-    header('Content-Type: application/json');
-    echo getLogsByPunchingCode($_GET['punchingcode']);
-    exit(); 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
+    if (isset($_GET['action'])) {
+        switch ($_GET['action']) {
+            case 'getLogs':
+                header('Content-Type: application/json');
+                echo getAllLogs();
+                exit();
+
+            case 'getLogsByPunchingCode':
+                $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
+                if ($punchingcode) {
+                    header('Content-Type: application/json');
+                    echo getLogsByPunchingCode($punchingcode);
+                } else {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
+                }
+                exit();
+
+            case 'exportLogs':
+                exportLogsToExcel();
+                exit();
+
+            default:
+                http_response_code(400);
+                echo json_encode(['error' => 'Invalid action']);
+                exit();
+        }
+    } else {
+        http_response_code(400);
+        echo json_encode(['error' => 'Action parameter is required']);
+        exit();
+    }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'exportLogs') {
-    exportLogsToExcel();
-}
 
 set_time_limit(0);
 ob_implicit_flush();

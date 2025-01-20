@@ -19,7 +19,7 @@ try{
 	$pdoConn->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
 	$pdoConn->exec("use ".$MYSQL_DB.";");
 
-    echo "Connected to the database successfully!";
+    // echo "Connected to the database successfully!";
 }catch(PDOException $e){
 	echo $e->getMessage();
 }
