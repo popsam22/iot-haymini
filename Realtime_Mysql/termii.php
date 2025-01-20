@@ -1,17 +1,21 @@
 <?php
+require __DIR__ . '/../vendor/autoload.php';
+use Dotenv\Dotenv;
+  
+$dotenv = Dotenv::createImmutable(__DIR__. '/../');
+$dotenv->load();
 
 function sendSms($message, $phone){
   $curl = curl_init();
 
-  $BASE_URL = "https://v3.api.termii.com/api/sms/send";
+  $BASE_URL = $_ENV['BASE_URL'];
 
   $data = [
-    // "to" => "2349134327450",
     "to" => $phone,
-    "from" => "Haymini",
+    "from" => $_ENV['TERMII_SENDER_ID'],
     "type" => "plain",
     "channel" => "generic",
-    "api_key" => "TLafynYzGqTyuduvHNjGTqfeYEsIXKChiyJSBmgLnCQfkTzCTjsQIiuSqLNFnO",
+    "api_key" => $_ENV['TERMII_API_KEY'],
     "sms" => "Hi there, your child clocked in at $message"
   ];
 
@@ -42,9 +46,3 @@ function sendSms($message, $phone){
   echo $response;
 }
 ?>
-
-
-
-
-TLafynYzGqTyuduvHNjGTqfeYEsIXKChiyJSBmgLnCQfkTzCTjsQIiuSqLNFnO 
-SENDER ID = Haymini

@@ -2,8 +2,13 @@
 require 'mailer.php';
 require "termii.php";
 include_once 'config.php';
+require __DIR__ . '/../vendor/autoload.php';
+
+use Dotenv\Dotenv;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+$dotenv = Dotenv::createImmutable(__DIR__. '/../');
+$dotenv->load();
 error_reporting(E_ALL);
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'getLogs') {
@@ -22,7 +27,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     exportLogsToExcel();
 }
 
-
 set_time_limit(0);
 ob_implicit_flush();
 
@@ -30,12 +34,13 @@ ob_implicit_flush();
 //date_default_timezone_set('PRC');
 
 $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-if(socket_bind($socket, SERVER_IP, SERVER_PORT)==false)
+if(socket_bind($socket, $SERVER_IP, $SERVER_PORT)==false)
 {
-	echo " bind Failed ".SERVER_IP.":".SERVER_PORT;;
+	var_dump($SERVER_PORT);
+	echo " bind Failed ".$SERVER_IP.":".$SERVER_PORT;
 	exit;
 }
-socket_listen($socket, MAX_THREADS);
+socket_listen($socket, $MAX_THREADS);
 //socket_set_nonblock($socket);
 
 $machines = array($socket); //所有Socket列表

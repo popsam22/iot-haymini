@@ -1,22 +1,25 @@
 <?php
-define('SERVER_IP', '192.168.8.101');
-// define('SERVER_IP', '172.20.10.5');
-define('SERVER_PORT', '7788');
-// define('MYSQL_HOST', 'localhost');
-define('MYSQL_HOST', 'punch.clq6gw02aji0.us-east-1.rds.amazonaws.com');
-// punch.cpiu0a4smj6j.us-east-1.rds.amazonaws.com
-// define('MYSQL_DB', 'Demo');
-define('MYSQL_DB', 'punch');
-// define('MYSQL_USER', 'root');
-define('MYSQL_USER', 'admin');
-// define('MYSQL_PASS', '');
-define('MYSQL_PASS', '8AeFCfi9HELiSFoie4MV');
-// pbxATdZmvLdSvQ2kNYDs
-define('MAX_THREADS', 32);
+require __DIR__ . '/../vendor/autoload.php';
+
+use Dotenv\Dotenv;
+
+$dotenv = Dotenv::createImmutable(__DIR__. '/../');
+$dotenv->load();
+
+$SERVER_IP = $_ENV['SERVER_IP'];
+$SERVER_PORT = $_ENV['SERVER_PORT'] ?? 7788;
+$MYSQL_HOST = $_ENV['MYSQL_HOST'];
+$MYSQL_DB = $_ENV['MYSQL_DB'];
+$MYSQL_USER = $_ENV['MYSQL_USER'];
+$MYSQL_PASS= $_ENV['MYSQL_PASS'];
+$MAX_THREADS = $_ENV['MAX_THREADS'];
+
 try{
-	$pdoConn = new PDO("mysql:host=".MYSQL_HOST,MYSQL_USER,MYSQL_PASS);
+	$pdoConn = new PDO("mysql:host=".$MYSQL_HOST,$MYSQL_USER,$MYSQL_PASS);
 	$pdoConn->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
-	$pdoConn->exec("use ".MYSQL_DB.";");
+	$pdoConn->exec("use ".$MYSQL_DB.";");
+
+    echo "Connected to the database successfully!";
 }catch(PDOException $e){
 	echo $e->getMessage();
 }
