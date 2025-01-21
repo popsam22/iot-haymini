@@ -12,18 +12,21 @@ $dotenv->load();
 error_reporting(E_ALL);
 
 if (php_sapi_name() === "cli") {
-    // Simulate $_GET for CLI
+    // Parse CLI options into $_GET
     $options = getopt("", ["action:", "punchingcode:"]);
     $_GET = $options ?: [];
 }
 
+// Handle GET requests or CLI calls
 if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
-    if (isset($_GET['action'])) {
-        switch ($_GET['action']) {
+    $action = $_GET['action'] ?? null;
+
+    if ($action) {
+        switch ($action) {
             case 'getLogs':
                 header('Content-Type: application/json');
                 echo getAllLogs();
-                exit();
+                break;
 
             case 'getLogsByPunchingCode':
                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
@@ -34,22 +37,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                     http_response_code(400);
                     echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
                 }
-                exit();
+                break;
 
             case 'exportLogs':
                 exportLogsToExcel();
-                exit();
+                break;
 
             default:
+                // Invalid action provided
                 http_response_code(400);
-                echo json_encode(['error' => 'Invalid action']);
-                exit();
+                echo json_encode([
+                    'error' => 'Invalid action',
+                    'available_actions' => [
+                        'getLogs',
+                        'getLogsByPunchingCode',
+                        'exportLogs'
+                    ]
+                ]);
+                break;
         }
     } else {
-        http_response_code(400);
-        echo json_encode(['error' => 'Action parameter is required']);
-        exit();
+        // No action provided, show default response
+        http_response_code(200);
+        echo json_encode([
+            'message' => 'Welcome to the API',
+            'instructions' => [
+                'getLogs' => '/ws.php?action=getLogs',
+                'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
+                'exportLogs' => '/ws.php?action=exportLogs'
+            ]
+        ]);
     }
+} else {
+    // Unsupported request method
+    http_response_code(405);
+    echo json_encode(['error' => 'Method not allowed']);
 }
 
 

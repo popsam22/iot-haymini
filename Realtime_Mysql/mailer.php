@@ -1,17 +1,17 @@
 <?php
-  require __DIR__ . '/../vendor/autoload.php';
+ require __DIR__ . '/../vendor/autoload.php';
   use PHPMailer\PHPMailer\PHPMailer;
   use PHPMailer\PHPMailer\Exception;
-  use PHPMailer\PHPMailer\SMTP;
+  use PHPMailer\PHPMailer\SMTP;  
   use Dotenv\Dotenv;
-  
+
   $dotenv = Dotenv::createImmutable(__DIR__. '/../');
   $dotenv->load();
 
   function sendEmail($to, $message, $subject){
     $mail = new PHPMailer(true);
     try {
-    $mail->SMTPDebug = SMTP::DEBUG_SERVER;                     
+    $mail->SMTPDebug = SMTP::DEBUG_SERVER;                      
     $mail->isSMTP();                                                 
     $mail->Host       = $_ENV['MAILER_HOST'];             
     $mail->SMTPAuth   = true;                                                   
