@@ -16,7 +16,7 @@ function sendSms($message, $phone){
     "type" => "plain",
     "channel" => "generic",
     "api_key" => $_ENV['TERMII_API_KEY'],
-    "sms" => "Hi there, your child clocked in at $message"
+    "sms" => "Kindly note that the card bearer with $message, just arrived at school"
   ];
 
   $post_data = json_encode($data);

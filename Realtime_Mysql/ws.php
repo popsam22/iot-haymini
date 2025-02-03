@@ -18,6 +18,62 @@ if (php_sapi_name() === "cli") {
 }
 
 // Handle GET requests or CLI calls
+// if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
+//     $action = $_GET['action'] ?? null;
+
+//     if ($action) {
+//         switch ($action) {
+//             case 'getLogs':
+//                 header('Content-Type: application/json');
+//                 echo getAllLogs();
+//                 break;
+
+//             case 'getLogsByPunchingCode':
+//                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
+//                 if ($punchingcode) {
+//                     header('Content-Type: application/json');
+//                     echo getLogsByPunchingCode($punchingcode);
+//                 } else {
+//                     http_response_code(400);
+//                     echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
+//                 }
+//                 break;
+
+//             case 'exportLogs':
+//                 exportLogsToExcel();
+//                 break;
+
+//             default:
+//                 // Invalid action provided
+//                 http_response_code(400);
+//                 echo json_encode([
+//                     'error' => 'Invalid action',
+//                     'available_actions' => [
+//                         'getLogs',
+//                         'getLogsByPunchingCode',
+//                         'exportLogs'
+//                     ]
+//                 ]);
+//                 break;
+//         }
+//     } else {
+//         // No action provided, show default response
+//         http_response_code(200);
+//         echo json_encode([
+//             'message' => 'Welcome to the API',
+//             'instructions' => [
+//                 'getLogs' => '/ws.php?action=getLogs',
+//                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
+//                 'exportLogs' => '/ws.php?action=exportLogs'
+//             ]
+//         ]);
+//     }
+// } else {
+//     // Unsupported request method
+//     http_response_code(405);
+//     echo json_encode(['error' => 'Method not allowed']);
+// }
+
 if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
     $action = $_GET['action'] ?? null;
 
@@ -43,6 +99,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                 exportLogsToExcel();
                 break;
 
+            case 'getOrCreateUser':
+                $punching_code = filter_input(INPUT_GET, 'punching_code');
+                $name = filter_input(INPUT_GET, 'name');
+                $phone = filter_input(INPUT_GET, 'phone');
+                $email = filter_input(INPUT_GET, 'email');
+
+                if ($punching_code && $name && $phone && $email) {
+                    header('Content-Type: application/json');
+                    echo json_encode(getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn));
+                } else {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Missing required parameters (punching_code, name, phone, email)']);
+                }
+                break;
+
             default:
                 // Invalid action provided
                 http_response_code(400);
@@ -51,20 +122,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                     'available_actions' => [
                         'getLogs',
                         'getLogsByPunchingCode',
-                        'exportLogs'
+                        'exportLogs',
+                        'getOrCreateUser' 
                     ]
                 ]);
                 break;
         }
     } else {
-        // No action provided, show default response
         http_response_code(200);
         echo json_encode([
             'message' => 'Welcome to the API',
             'instructions' => [
                 'getLogs' => '/ws.php?action=getLogs',
                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
-                'exportLogs' => '/ws.php?action=exportLogs'
+                'exportLogs' => '/ws.php?action=exportLogs',
+						'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}'
             ]
         ]);
     }
@@ -73,6 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
 }
+
 
 
 set_time_limit(0);
@@ -576,64 +649,81 @@ function saveImg($img)
 	echo "</br>save file ".$fileName;
 }
 
-// function store($records, $id , $sts = 0){
-// 		global $pdoConn;
-// 		$sql = 'Insert INTO tblt_timesheet(punchingcode,date,time,Tid) values';
-// 		$sqlArray = array();
-// 		foreach($records as $record){
-// 				$sqlArray[] = '("'.$record["enrollid"].'","'.date("Y-m-d",strtotime($record["time"])).'","'.date("H:i:s",strtotime($record["time"])).'","'.$id.'")';
+// function store($records, $id, $sts = 0) {
+//     global $pdoConn;
 
-// 				//email sending
-// 				// $to =  'balogunayobamme@gmail.com';
-// 				$to =  'sobiechie16@gmail.com';
-// 				$message = 'New Entry For you Habib';
-// 				$subject = 'New record has been inserted with details: Card Number: '.$record["enrollid"].', Date: '.date("Y-m-d", strtotime($record["time"])).', Time: '.date("H:i:s", strtotime($record["time"]));
+//     // Base SQL query
+//     $sql = 'INSERT INTO tblt_timesheet (punchingcode, date, time, Tid) VALUES ';
+//     $sqlArray = [];
 
-// 				sendEmail($to, $subject, $message);
+//     foreach ($records as $record) {
+//         // Validate time field
+//         if (empty($record["time"]) || !strtotime($record["time"])) {
+//             continue; // Skip invalid records
+//         }
 
-// 				// $phoneNumber = '2347036248186'; 
-// 				$phoneNumber = '2349134327450'; 
-//         $smsMessage = 'Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
-//         sendSms($smsMessage, $phoneNumber);
-// 		}
-// 		if(!empty($sqlArray)){
-// 			$sql2=$sql.implode(",",$sqlArray);
-// 			echo "</br>sql".$sql2;
-// 			$stmt = $pdoConn->prepare($sql2);
-// 			try {
-// 			   $exec = $stmt->execute();
-// 			} catch (PDOException $e){
-// 			   echo $e->getMessage();
-// 			}		
-// 			if($exec){
-// 				if($sts){
-// 					$result = '{"cmd":"getalllog","stn":false,"cloudtime":"'.date('Y-m-d H:i:s').'"}';
-// 				}else{
-// 					$result = '{"ret":"sendlog","result":true,"cloudtime":"'.date('Y-m-d H:i:s').'"}';				
-// 				}
-// 				return $result;
-// 			}else{
-// 				$result = '{"ret":"sendlog","result":false,"reason":1}';			
-// 			}
-// 		}else{
-// 				$result = '{"ret":"sendlog","result":false,"reason":1}';			
-// 		}
-// 		//return $result;
-// 	return '{"ret":"sendlog", "result":true, "cloudtime":"'.date('Y-m-d H:i:s').'"}';;
+//         // Check for duplicates in the database
+//         $stmt = $pdoConn->prepare(
+//             "SELECT COUNT(*) FROM tblt_timesheet WHERE punchingcode = ? AND date = ? AND time = ?"
+//         );
+//         $stmt->execute([
+//             $record["enrollid"],
+//             date("Y-m-d", strtotime($record["time"])),
+//             date("H:i:s", strtotime($record["time"]))
+//         ]);
 
+//         if ($stmt->fetchColumn() == 0) {
+//             // Add to SQL Array if not duplicate
+//             $sqlArray[] = '("' . $record["enrollid"] . '", "' . date("Y-m-d", strtotime($record["time"])) . '", "' . date("H:i:s", strtotime($record["time"])) . '", "' . $id . '")';
+
+//             // Send email notification
+//             $to = 'sobiechie16@gmail.com';
+//             $subject = 'New record has been inserted';
+//             $message = 'Details: Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
+//             sendEmail($to,$message, $subject);
+
+//             // Send SMS notification
+//             $phoneNumber = '2349134327450';
+//             $smsMessage = 'Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
+//             sendSms($smsMessage, $phoneNumber);
+//         }
+//     }
+
+//     if (!empty($sqlArray)) {
+//         // Combine SQL statements and prepare query
+//         $sql2 = $sql . implode(",", $sqlArray);
+
+//         try {
+//             $stmt = $pdoConn->prepare($sql2);
+//             $exec = $stmt->execute();
+//         } catch (PDOException $e) {
+//             // Log SQL error
+//             error_log("SQL Error: " . $e->getMessage());
+//             return '{"ret":"sendlog","result":false,"reason":"SQL Error"}';
+//         }
+
+//         if ($exec) {
+//             $result = $sts
+//                 ? '{"cmd":"getalllog","stn":false,"cloudtime":"' . date('Y-m-d H:i:s') . '"}'
+//                 : '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '"}';
+//             return $result;
+//         } else {
+//             return '{"ret":"sendlog","result":false,"reason":"Execution failed"}';
+//         }
+//     }
+
+//     return '{"ret":"sendlog","result":false,"reason":"No records to insert"}';
 // }
 
 function store($records, $id, $sts = 0) {
     global $pdoConn;
 
-    // Base SQL query
     $sql = 'INSERT INTO tblt_timesheet (punchingcode, date, time, Tid) VALUES ';
     $sqlArray = [];
 
     foreach ($records as $record) {
-        // Validate time field
         if (empty($record["time"]) || !strtotime($record["time"])) {
-            continue; // Skip invalid records
+            continue;
         }
 
         // Check for duplicates in the database
@@ -650,21 +740,33 @@ function store($records, $id, $sts = 0) {
             // Add to SQL Array if not duplicate
             $sqlArray[] = '("' . $record["enrollid"] . '", "' . date("Y-m-d", strtotime($record["time"])) . '", "' . date("H:i:s", strtotime($record["time"])) . '", "' . $id . '")';
 
-            // Send email notification
-            $to = 'sobiechie16@gmail.com';
-            $subject = 'New record has been inserted';
-            $message = 'Details: Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
-            sendEmail($to,$message, $subject);
+            // Fetch the user's phone and email based on punchingcode
+            $stmt = $pdoConn->prepare("SELECT phone_number, email FROM users WHERE punching_code = ?");
+            $stmt->execute([$record["enrollid"]]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Send SMS notification
-            $phoneNumber = '2349134327450';
-            $smsMessage = 'Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
-            sendSms($smsMessage, $phoneNumber);
+            if ($user) {
+                $phoneNumber = $user['phone_number'];
+                $email = $user['email'];
+
+                // Send email notification
+                $subject = 'New record has been inserted';
+                // $message = 'Details: Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
+                $message = $message = 'Kindly note that the card bearer with Card Number: ' . $record["enrollid"] . ' just arrived at school';
+                sendEmail($email, $message, $subject);
+
+                // Send SMS notification
+                // $smsMessage = 'Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
+                $smsMessage = 'Card Number: ' . $record["enrollid"];
+                sendSms($smsMessage, $phoneNumber);
+            } else {
+                // Fallback in case no user is found (optional, depending on your need)
+                error_log("No user found for punching code: " . $record["enrollid"]);
+            }
         }
     }
 
     if (!empty($sqlArray)) {
-        // Combine SQL statements and prepare query
         $sql2 = $sql . implode(",", $sqlArray);
 
         try {
@@ -687,6 +789,26 @@ function store($records, $id, $sts = 0) {
     }
 
     return '{"ret":"sendlog","result":false,"reason":"No records to insert"}';
+}
+
+
+function getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn) {
+  //check if user exists first
+    $stmt = $pdoConn->prepare("SELECT id FROM users WHERE punching_code = ?");
+    $stmt->execute([$punching_code]);
+    $user_id = $stmt->fetchColumn();
+
+    // If user exists, return the existing `user_id`
+    if ($user_id) {
+        return ["status" => "exists", "user_id" => $user_id];
+    }
+
+    // If user doesn't exist, insert a new user
+    $stmt = $pdoConn->prepare("INSERT INTO users (punching_code, name, phone_number, email) VALUES (?, ?, ?, ?)");
+    $stmt->execute([$punching_code, $name, $phone, $email]);
+
+    // Return the new user's `id`
+    return $pdoConn->lastInsertId();
 }
 
 
