@@ -10,69 +10,24 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 $dotenv = Dotenv::createImmutable(__DIR__. '/../');
 $dotenv->load();
 error_reporting(E_ALL);
+ 
+
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, PATCH, DELETE");
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+
+// Handle preflight (OPTIONS) request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
 
 if (php_sapi_name() === "cli") {
     // Parse CLI options into $_GET
     $options = getopt("", ["action:", "punchingcode:"]);
     $_GET = $options ?: [];
 }
-
-// Handle GET requests or CLI calls
-// if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
-//     $action = $_GET['action'] ?? null;
-
-//     if ($action) {
-//         switch ($action) {
-//             case 'getLogs':
-//                 header('Content-Type: application/json');
-//                 echo getAllLogs();
-//                 break;
-
-//             case 'getLogsByPunchingCode':
-//                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
-//                 if ($punchingcode) {
-//                     header('Content-Type: application/json');
-//                     echo getLogsByPunchingCode($punchingcode);
-//                 } else {
-//                     http_response_code(400);
-//                     echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
-//                 }
-//                 break;
-
-//             case 'exportLogs':
-//                 exportLogsToExcel();
-//                 break;
-
-//             default:
-//                 // Invalid action provided
-//                 http_response_code(400);
-//                 echo json_encode([
-//                     'error' => 'Invalid action',
-//                     'available_actions' => [
-//                         'getLogs',
-//                         'getLogsByPunchingCode',
-//                         'exportLogs'
-//                     ]
-//                 ]);
-//                 break;
-//         }
-//     } else {
-//         // No action provided, show default response
-//         http_response_code(200);
-//         echo json_encode([
-//             'message' => 'Welcome to the API',
-//             'instructions' => [
-//                 'getLogs' => '/ws.php?action=getLogs',
-//                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
-//                 'exportLogs' => '/ws.php?action=exportLogs'
-//             ]
-//         ]);
-//     }
-// } else {
-//     // Unsupported request method
-//     http_response_code(405);
-//     echo json_encode(['error' => 'Method not allowed']);
-// }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
     $action = $_GET['action'] ?? null;
@@ -181,7 +136,7 @@ ob_flush();
 $bConnect=false;
 $startTime=microtime(true);
 $getList=true;
-$dataTime=microtime(true);;
+$dataTime=microtime(true);
 do {
 	$unread = $machines;
 	if(socket_select($unread, $write, $except, 0,100)>0)
