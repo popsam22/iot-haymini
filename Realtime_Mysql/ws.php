@@ -767,37 +767,75 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn) {
 }
 
 
+// function getAllLogs() {
+// 	global $pdoConn;
+// 	header('Content-Type: application/json');
+
+// 	try {
+//         $sql = 'SELECT punchingcode, date, time, Tid FROM tblt_timesheet ORDER BY date DESC, time DESC';
+//         $stmt = $pdoConn->prepare($sql);
+//         $stmt->execute();
+//         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+//         // Return the logs in JSON format
+//         return json_encode(['logs' => $logs]);
+//     } catch (PDOException $e) {
+//         return json_encode(['error' => $e->getMessage()]);
+//     }
+// }
+
 function getAllLogs() {
-	global $pdoConn;
-	try {
+    global $pdoConn;
+    header('Content-Type: application/json');
+
+    try {
         $sql = 'SELECT punchingcode, date, time, Tid FROM tblt_timesheet ORDER BY date DESC, time DESC';
         $stmt = $pdoConn->prepare($sql);
         $stmt->execute();
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // Return the logs in JSON format
-        return json_encode(['logs' => $logs]);
+        echo json_encode(['logs' => $logs]);
     } catch (PDOException $e) {
-        return json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => $e->getMessage()]);
     }
 }
 
+
+// function getLogsByPunchingCode($punchingCode) {
+//     global $pdoConn;
+// 	header('Content-Type: application/json');
+
+//     try {
+//         $stmt = $pdoConn->prepare("SELECT * FROM tblt_timesheet WHERE punchingcode = :punchingCode");
+//         $stmt->bindParam(':punchingCode', $punchingCode, PDO::PARAM_STR);
+//         // Execute the query
+//         $stmt->execute();
+//         // Fetch all matching records
+//         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+//         // Return results as JSON
+//         return json_encode($logs);
+//     } catch (PDOException $e) {
+//         // Handle any errors, return as JSON error message
+//         return json_encode(['error' => $e->getMessage()]);
+//     }
+// }
+
 function getLogsByPunchingCode($punchingCode) {
     global $pdoConn;
+    header('Content-Type: application/json'); 
+
     try {
         $stmt = $pdoConn->prepare("SELECT * FROM tblt_timesheet WHERE punchingcode = :punchingCode");
         $stmt->bindParam(':punchingCode', $punchingCode, PDO::PARAM_STR);
-        // Execute the query
         $stmt->execute();
-        // Fetch all matching records
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        // Return results as JSON
-        return json_encode($logs);
+        
+        echo json_encode($logs);
     } catch (PDOException $e) {
-        // Handle any errors, return as JSON error message
-        return json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => $e->getMessage()]);
     }
 }
+
 
 // function getUserList() {
 //     global $socket; // Assuming you have a socket connection setup
