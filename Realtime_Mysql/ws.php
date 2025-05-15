@@ -109,6 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
         switch ($action) {
             case 'getLogs':
                 echo getAllLogs();
+				exit;
                 break;
 
             case 'getLogsByPunchingCode':
@@ -216,7 +217,7 @@ $userData=array(); //用户列表
 $startData = date('md His_');
 $imgID=1;
 
-echo " start...$startData </br>";
+// echo " start...$startData </br>";
 ob_flush();
 
 $bConnect=false;
