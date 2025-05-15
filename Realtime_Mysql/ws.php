@@ -109,14 +109,26 @@ ob_implicit_flush();
 //date_default_timezone_set('Asia/Calcutta');
 //date_default_timezone_set('PRC');
 
+// $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+// if(socket_bind($socket, $SERVER_IP, $SERVER_PORT)==false)
+// {
+// 	var_dump($SERVER_PORT);
+// 	echo " bind Failed ".$SERVER_IP.":".$SERVER_PORT;
+// 	exit;
+// }
+// socket_listen($socket, $MAX_THREADS);
+
+
 $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-if(socket_bind($socket, $SERVER_IP, $SERVER_PORT)==false)
-{
-	var_dump($SERVER_PORT);
-	echo " bind Failed ".$SERVER_IP.":".$SERVER_PORT;
-	exit;
+if (socket_bind($socket, $SERVER_IP, $SERVER_PORT) == false) {
+    error_log("Socket bind failed on $SERVER_IP:$SERVER_PORT");
+    http_response_code(500);
+    echo json_encode(["error" => "Socket bind failed."]);
+    exit;
 }
 socket_listen($socket, $MAX_THREADS);
+
+
 //socket_set_nonblock($socket);
 
 $machines = array($socket); //所有Socket列表
