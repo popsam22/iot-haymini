@@ -29,20 +29,91 @@ if (php_sapi_name() === "cli") {
     $_GET = $options ?: [];
 }
 
+// if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
+//     $action = $_GET['action'] ?? null;
+
+//     if ($action) {
+//         switch ($action) {
+//             case 'getLogs':
+//                 header('Content-Type: application/json');
+//                 echo getAllLogs();
+//                 break;
+
+//             case 'getLogsByPunchingCode':
+//                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
+//                 if ($punchingcode) {
+//                     header('Content-Type: application/json');
+//                     echo getLogsByPunchingCode($punchingcode);
+//                 } else {
+//                     http_response_code(400);
+//                     echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
+//                 }
+//                 break;
+
+//             case 'exportLogs':
+//                 exportLogsToExcel();
+//                 break;
+
+//             case 'getOrCreateUser':
+//                 $punching_code = filter_input(INPUT_GET, 'punching_code');
+//                 $name = filter_input(INPUT_GET, 'name');
+//                 $phone = filter_input(INPUT_GET, 'phone');
+//                 $email = filter_input(INPUT_GET, 'email');
+
+//                 if ($punching_code && $name && $phone && $email) {
+//                     header('Content-Type: application/json');
+//                     echo json_encode(getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn));
+//                 } else {
+//                     http_response_code(400);
+//                     echo json_encode(['error' => 'Missing required parameters (punching_code, name, phone, email)']);
+//                 }
+//                 break;
+
+//             default:
+//                 // Invalid action provided
+//                 http_response_code(400);
+//                 echo json_encode([
+//                     'error' => 'Invalid action',
+//                     'available_actions' => [
+//                         'getLogs',
+//                         'getLogsByPunchingCode',
+//                         'exportLogs',
+//                         'getOrCreateUser' 
+//                     ]
+//                 ]);
+//                 break;
+//         }
+//     } else {
+//         http_response_code(200);
+//         echo json_encode([
+//             'message' => 'Welcome to the API',
+//             'instructions' => [
+//                 'getLogs' => '/ws.php?action=getLogs',
+//                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
+//                 'exportLogs' => '/ws.php?action=exportLogs',
+// 						'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}'
+//             ]
+//         ]);
+//     }
+// } else {
+//     // Unsupported request method
+//     http_response_code(405);
+//     echo json_encode(['error' => 'Method not allowed']);
+// }
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
     $action = $_GET['action'] ?? null;
 
     if ($action) {
         switch ($action) {
             case 'getLogs':
-                header('Content-Type: application/json');
                 echo getAllLogs();
                 break;
 
             case 'getLogsByPunchingCode':
                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
                 if ($punchingcode) {
-                    header('Content-Type: application/json');
                     echo getLogsByPunchingCode($punchingcode);
                 } else {
                     http_response_code(400);
@@ -61,7 +132,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                 $email = filter_input(INPUT_GET, 'email');
 
                 if ($punching_code && $name && $phone && $email) {
-                    header('Content-Type: application/json');
                     echo json_encode(getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn));
                 } else {
                     http_response_code(400);
@@ -69,8 +139,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                 }
                 break;
 
+            case 'startSocketServer':
+                echo startSocketServer();
+                break;
+
             default:
-                // Invalid action provided
                 http_response_code(400);
                 echo json_encode([
                     'error' => 'Invalid action',
@@ -78,7 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                         'getLogs',
                         'getLogsByPunchingCode',
                         'exportLogs',
-                        'getOrCreateUser' 
+                        'getOrCreateUser',
+                        'startSocketServer'
                     ]
                 ]);
                 break;
@@ -91,12 +165,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                 'getLogs' => '/ws.php?action=getLogs',
                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
                 'exportLogs' => '/ws.php?action=exportLogs',
-						'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}'
+                'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}',
+                'startSocketServer' => '/ws.php?action=startSocketServer'
             ]
         ]);
     }
 } else {
-    // Unsupported request method
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
 }
@@ -119,14 +193,14 @@ ob_implicit_flush();
 // socket_listen($socket, $MAX_THREADS);
 
 
-$socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-if (socket_bind($socket, $SERVER_IP, $SERVER_PORT) == false) {
-    error_log("Socket bind failed on $SERVER_IP:$SERVER_PORT");
-    http_response_code(500);
-    echo json_encode(["error" => "Socket bind failed."]);
-    exit;
-}
-socket_listen($socket, $MAX_THREADS);
+// $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+// if (socket_bind($socket, $SERVER_IP, $SERVER_PORT) == false) {
+//     error_log("Socket bind failed on $SERVER_IP:$SERVER_PORT");
+//     http_response_code(500);
+//     echo json_encode(["error" => "Socket bind failed."]);
+//     exit;
+// }
+// socket_listen($socket, $MAX_THREADS);
 
 
 //socket_set_nonblock($socket);
@@ -798,17 +872,14 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn) {
 
 function getAllLogs() {
     global $pdoConn;
-    header('Content-Type: application/json');
-
     try {
         $sql = 'SELECT punchingcode, date, time, Tid FROM tblt_timesheet ORDER BY date DESC, time DESC';
         $stmt = $pdoConn->prepare($sql);
         $stmt->execute();
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        echo json_encode(['logs' => $logs]);
+        return json_encode(['logs' => $logs]);
     } catch (PDOException $e) {
-        echo json_encode(['error' => $e->getMessage()]);
+        return json_encode(['error' => $e->getMessage()]);
     }
 }
 
@@ -834,18 +905,31 @@ function getAllLogs() {
 
 function getLogsByPunchingCode($punchingCode) {
     global $pdoConn;
-    header('Content-Type: application/json'); 
-
     try {
         $stmt = $pdoConn->prepare("SELECT * FROM tblt_timesheet WHERE punchingcode = :punchingCode");
         $stmt->bindParam(':punchingCode', $punchingCode, PDO::PARAM_STR);
         $stmt->execute();
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        echo json_encode($logs);
+        return json_encode(['logs' => $logs]);
     } catch (PDOException $e) {
-        echo json_encode(['error' => $e->getMessage()]);
+        return json_encode(['error' => $e->getMessage()]);
     }
+}
+
+function startSocketServer() {
+    global $SERVER_IP, $SERVER_PORT, $MAX_THREADS;
+
+    $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+    if ($socket === false) {
+        return json_encode(['error' => 'Socket creation failed.']);
+    }
+
+    if (socket_bind($socket, $SERVER_IP, $SERVER_PORT) === false) {
+        return json_encode(['error' => "Socket bind failed on $SERVER_IP:$SERVER_PORT"]);
+    }
+
+    socket_listen($socket, $MAX_THREADS);
+    return json_encode(['message' => "Socket server started on $SERVER_IP:$SERVER_PORT"]);
 }
 
 
