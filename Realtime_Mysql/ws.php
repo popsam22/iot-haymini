@@ -14,7 +14,7 @@ error_reporting(E_ALL);
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, PATCH, DELETE");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, Cache-Control");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, Cache-Control, Content-Disposition");
 
 // Handle preflight (OPTIONS) request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
