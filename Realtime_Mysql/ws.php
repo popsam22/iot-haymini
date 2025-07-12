@@ -23,83 +23,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 
-if (php_sapi_name() === "cli") {
-    // Parse CLI options into $_GET
-    $options = getopt("", ["action:", "punchingcode:"]);
-    $_GET = $options ?: [];
-}
-
-// if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
-//     $action = $_GET['action'] ?? null;
-
-//     if ($action) {
-//         switch ($action) {
-//             case 'getLogs':
-//                 header('Content-Type: application/json');
-//                 echo getAllLogs();
-//                 break;
-
-//             case 'getLogsByPunchingCode':
-//                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
-//                 if ($punchingcode) {
-//                     header('Content-Type: application/json');
-//                     echo getLogsByPunchingCode($punchingcode);
-//                 } else {
-//                     http_response_code(400);
-//                     echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
-//                 }
-//                 break;
-
-//             case 'exportLogs':
-//                 exportLogsToExcel();
-//                 break;
-
-//             case 'getOrCreateUser':
-//                 $punching_code = filter_input(INPUT_GET, 'punching_code');
-//                 $name = filter_input(INPUT_GET, 'name');
-//                 $phone = filter_input(INPUT_GET, 'phone');
-//                 $email = filter_input(INPUT_GET, 'email');
-
-//                 if ($punching_code && $name && $phone && $email) {
-//                     header('Content-Type: application/json');
-//                     echo json_encode(getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn));
-//                 } else {
-//                     http_response_code(400);
-//                     echo json_encode(['error' => 'Missing required parameters (punching_code, name, phone, email)']);
-//                 }
-//                 break;
-
-//             default:
-//                 // Invalid action provided
-//                 http_response_code(400);
-//                 echo json_encode([
-//                     'error' => 'Invalid action',
-//                     'available_actions' => [
-//                         'getLogs',
-//                         'getLogsByPunchingCode',
-//                         'exportLogs',
-//                         'getOrCreateUser' 
-//                     ]
-//                 ]);
-//                 break;
-//         }
-//     } else {
-//         http_response_code(200);
-//         echo json_encode([
-//             'message' => 'Welcome to the API',
-//             'instructions' => [
-//                 'getLogs' => '/ws.php?action=getLogs',
-//                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
-//                 'exportLogs' => '/ws.php?action=exportLogs',
-// 						'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}'
-//             ]
-//         ]);
-//     }
-// } else {
-//     // Unsupported request method
-//     http_response_code(405);
-//     echo json_encode(['error' => 'Method not allowed']);
+// if (php_sapi_name() === "cli") {
+//     // Parse CLI options into $_GET
+//     $options = getopt("", ["action:", "punchingcode:"]);
+//     $_GET = $options ?: [];
 // }
+
+if (php_sapi_name() === 'cli') {
+    echo "Starting socket server...\n";
+    startSocketServer();
+    exit();
+}
 
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
@@ -138,10 +72,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                     http_response_code(400);
                     echo json_encode(['error' => 'Missing required parameters (punching_code, name, phone, email)']);
                 }
-                break;
-
-            case 'startSocketServer':
-                echo startSocketServer();
                 break;
 
             default:
@@ -917,21 +847,73 @@ function getLogsByPunchingCode($punchingCode) {
     }
 }
 
+// function startSocketServer() {
+//     global $SERVER_IP, $SERVER_PORT, $MAX_THREADS;
+
+//     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+//     if ($socket === false) {
+//         return json_encode(['error' => 'Socket creation failed.']);
+//     }
+
+//     if (socket_bind($socket, $SERVER_IP, $SERVER_PORT) === false) {
+//         return json_encode(['error' => "Socket bind failed on $SERVER_IP:$SERVER_PORT"]);
+//     }
+
+//     socket_listen($socket, $MAX_THREADS);
+//     return json_encode(['message' => "Socket server started on $SERVER_IP:$SERVER_PORT"]);
+// }
+
 function startSocketServer() {
     global $SERVER_IP, $SERVER_PORT, $MAX_THREADS;
 
     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
     if ($socket === false) {
-        return json_encode(['error' => 'Socket creation failed.']);
+        echo "Socket creation failed\n";
+        exit(1);
     }
 
     if (socket_bind($socket, $SERVER_IP, $SERVER_PORT) === false) {
-        return json_encode(['error' => "Socket bind failed on $SERVER_IP:$SERVER_PORT"]);
+        echo "Socket bind failed on $SERVER_IP:$SERVER_PORT\n";
+        exit(1);
     }
 
     socket_listen($socket, $MAX_THREADS);
-    return json_encode(['message' => "Socket server started on $SERVER_IP:$SERVER_PORT"]);
+    echo "Socket server started on $SERVER_IP:$SERVER_PORT\n";
+
+    $clients = [$socket];
+
+    while (true) {
+        $read = $clients;
+		$write = [];
+		$except = [];
+        if (socket_select($read, $write, $except, 0) < 1) {
+            continue;
+        }
+
+        if (in_array($socket, $read)) {
+            $client = socket_accept($socket);
+            $clients[] = $client;
+            echo "New connection accepted\n";
+            $key = array_search($socket, $read);
+            unset($read[$key]);
+        }
+
+        foreach ($read as $read_sock) {
+            $data = socket_read($read_sock, 1024, PHP_NORMAL_READ);
+            if ($data === false) {
+                $key = array_search($read_sock, $clients);
+                unset($clients[$key]);
+                socket_close($read_sock);
+                continue;
+            }
+            echo "Received data: $data\n";
+            // TODO: Handle your incoming messages here
+        }
+    }
+
+    socket_close($socket);
 }
+
 
 
 // function getUserList() {
