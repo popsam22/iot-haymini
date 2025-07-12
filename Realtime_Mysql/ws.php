@@ -83,7 +83,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                         'getLogsByPunchingCode',
                         'exportLogs',
                         'getOrCreateUser',
-                        'startSocketServer'
                     ]
                 ]);
                 break;
@@ -97,7 +96,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
                 'exportLogs' => '/ws.php?action=exportLogs',
                 'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}',
-                'startSocketServer' => '/ws.php?action=startSocketServer'
             ]
         ]);
     }
