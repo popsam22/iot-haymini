@@ -715,81 +715,341 @@ function saveImg($img)
 //     return '{"ret":"sendlog","result":false,"reason":"No records to insert"}';
 // }
 
+// function store($records, $id, $sts = 0) {
+//     global $pdoConn;
+
+//     $sql = 'INSERT INTO tblt_timesheet (punchingcode, date, time, Tid) VALUES ';
+//     $sqlArray = [];
+
+//     foreach ($records as $record) {
+//         if (empty($record["time"]) || !strtotime($record["time"])) {
+//             continue;
+//         }
+
+//         // Check for duplicates in the database
+//         $stmt = $pdoConn->prepare(
+//             "SELECT COUNT(*) FROM tblt_timesheet WHERE punchingcode = ? AND date = ? AND time = ?"
+//         );
+//         $stmt->execute([
+//             $record["enrollid"],
+//             date("Y-m-d", strtotime($record["time"])),
+//             date("H:i:s", strtotime($record["time"]))
+//         ]);
+
+//         if ($stmt->fetchColumn() == 0) {
+//             // Add to SQL Array if not duplicate
+//             $sqlArray[] = '("' . $record["enrollid"] . '", "' . date("Y-m-d", strtotime($record["time"])) . '", "' . date("H:i:s", strtotime($record["time"])) . '", "' . $id . '")';
+
+//             // Fetch the user's phone and email based on punchingcode
+//             $stmt = $pdoConn->prepare("SELECT phone_number, email FROM users WHERE punching_code = ?");
+//             $stmt->execute([$record["enrollid"]]);
+//             $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+//             if ($user) {
+//                 $phoneNumber = $user['phone_number'];
+//                 $email = $user['email'];
+
+//                 // Send email notification
+//                 $subject = 'New record has been inserted';
+//                 $message = $message = 'Kindly note that the card bearer with Card Number: ' . $record["enrollid"] . ' just arrived at school';
+//                 sendEmail($email, $message, $subject);
+
+//                 // Send SMS notification
+//                 $smsMessage = 'Card Number: ' . $record["enrollid"];
+//                 sendSms($smsMessage, $phoneNumber);
+//             } else {
+//                 // Fallback in case no user is found (optional, depending on your need)
+//                 error_log("No user found for punching code: " . $record["enrollid"]);
+//             }
+//         }
+//     }
+
+//     if (!empty($sqlArray)) {
+//         $sql2 = $sql . implode(",", $sqlArray);
+
+//         try {
+//             $stmt = $pdoConn->prepare($sql2);
+//             $exec = $stmt->execute();
+//         } catch (PDOException $e) {
+//             // Log SQL error
+//             error_log("SQL Error: " . $e->getMessage());
+//             return '{"ret":"sendlog","result":false,"reason":"SQL Error"}';
+//         }
+
+//         if ($exec) {
+//             $result = $sts
+//                 ? '{"cmd":"getalllog","stn":false,"cloudtime":"' . date('Y-m-d H:i:s') . '"}'
+//                 : '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '"}';
+//             return $result;
+//         } else {
+//             return '{"ret":"sendlog","result":false,"reason":"Execution failed"}';
+//         }
+//     }
+
+//     return '{"ret":"sendlog","result":false,"reason":"No records to insert"}';
+// }
+
+// function store($records, $id, $sts = 0) {
+//     global $pdoConn;
+
+//     $insertData = [];
+//     $insertParams = [];
+
+//     foreach ($records as $record) {
+//         if (empty($record["time"]) || !strtotime($record["time"])) {
+//             error_log("Skipping invalid record: " . json_encode($record));
+//             continue;
+//         }
+
+//         $punchingCode = $record["enrollid"];
+//         $date = date("Y-m-d", strtotime($record["time"]));
+//         $time = date("H:i:s", strtotime($record["time"]));
+
+//         // Check for duplicates
+//         $stmt = $pdoConn->prepare(
+//             "SELECT COUNT(*) FROM tblt_timesheet WHERE punchingcode = ? AND date = ? AND time = ?"
+//         );
+//         $stmt->execute([$punchingCode, $date, $time]);
+
+//         if ($stmt->fetchColumn() == 0) {
+//             // Prepare data for insertion
+//             $insertData[] = "(?, ?, ?, ?)";
+//             array_push($insertParams, $punchingCode, $date, $time, $id);
+
+//             // Fetch user info
+//             $userStmt = $pdoConn->prepare("SELECT phone_number, email FROM users WHERE punching_code = ?");
+//             $userStmt->execute([$punchingCode]);
+//             $user = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+//             if ($user) {
+//                 // Notify user
+//                 $msg = 'Kindly note that the card bearer with Card Number: ' . $punchingCode . ' just arrived at school';
+//                 sendEmail($user['email'], $msg, 'New record has been inserted');
+//                 sendSms('Card Number: ' . $punchingCode, $user['phone_number']);
+//             } else {
+//                 error_log("No user found for punching code: $punchingCode");
+//             }
+//         } else {
+//             error_log("Duplicate skipped: punchingcode=$punchingCode, date=$date, time=$time");
+//         }
+//     }
+
+//     if (!empty($insertData)) {
+//         $sql = "INSERT INTO tblt_timesheet (punchingcode, date, time, Tid) VALUES " . implode(",", $insertData);
+
+//         try {
+//             $stmt = $pdoConn->prepare($sql);
+//             $exec = $stmt->execute($insertParams);
+//         } catch (PDOException $e) {
+//             error_log("SQL Error: " . $e->getMessage());
+//             return '{"ret":"sendlog","result":false,"reason":"SQL Error"}';
+//         }
+
+//         if ($exec) {
+//             $cloudtime = date('Y-m-d H:i:s');
+//             return $sts
+//                 ? '{"cmd":"getalllog","stn":false,"cloudtime":"' . $cloudtime . '"}'
+//                 : '{"ret":"sendlog","result":true,"cloudtime":"' . $cloudtime . '"}';
+//         } else {
+//             return '{"ret":"sendlog","result":false,"reason":"Execution failed"}';
+//         }
+//     }
+
+//     error_log("Using DB: " . $pdoConn->query("SELECT DATABASE()")->fetchColumn());
+//     return '{"ret":"sendlog","result":false,"reason":"No records to insert"}';
+// }
+
 function store($records, $id, $sts = 0) {
     global $pdoConn;
 
+    // Input validation
+    if (empty($records) || !is_array($records)) {
+        error_log("Invalid records input: " . print_r($records, true));
+        return '{"ret":"sendlog","result":false,"reason":"Invalid records data"}';
+    }
+
+    error_log("Processing batch with " . count($records) . " records for device ID: " . $id);
+
     $sql = 'INSERT INTO tblt_timesheet (punchingcode, date, time, Tid) VALUES ';
     $sqlArray = [];
+    $processedInBatch = []; // Track records processed in this batch
+    $duplicatesInBatch = 0;
+    $duplicatesInDb = 0;
+    $invalidRecords = 0;
+    $successfulNotifications = 0;
 
-    foreach ($records as $record) {
-        if (empty($record["time"]) || !strtotime($record["time"])) {
+    foreach ($records as $index => $record) {
+        // Validate record structure
+        if (!isset($record["enrollid"]) || !isset($record["time"])) {
+            error_log("Invalid record structure at index $index: " . print_r($record, true));
+            $invalidRecords++;
             continue;
         }
 
+        // Validate time format
+        if (empty($record["time"]) || !strtotime($record["time"])) {
+            error_log("Invalid time format at index $index: " . $record["time"]);
+            $invalidRecords++;
+            continue;
+        }
+
+        // Create unique key for this record (enrollid + datetime)
+        $recordKey = $record["enrollid"] . "_" . $record["time"];
+        
+        // Skip if already processed in this batch
+        if (isset($processedInBatch[$recordKey])) {
+            error_log("Duplicate found in batch: " . $recordKey);
+            $duplicatesInBatch++;
+            continue;
+        }
+        
+        // Mark as processed in this batch
+        $processedInBatch[$recordKey] = true;
+
         // Check for duplicates in the database
-        $stmt = $pdoConn->prepare(
-            "SELECT COUNT(*) FROM tblt_timesheet WHERE punchingcode = ? AND date = ? AND time = ?"
+        try {
+            $stmt = $pdoConn->prepare(
+                "SELECT COUNT(*) FROM tblt_timesheet WHERE punchingcode = ? AND date = ? AND time = ? AND Tid = ?"
+            );
+            $stmt->execute([
+                $record["enrollid"],
+                date("Y-m-d", strtotime($record["time"])),
+                date("H:i:s", strtotime($record["time"])),
+                $id
+            ]);
+
+            if ($stmt->fetchColumn() > 0) {
+                error_log("Duplicate found in database: " . $recordKey);
+                $duplicatesInDb++;
+                continue;
+            }
+        } catch (PDOException $e) {
+            error_log("Database error during duplicate check: " . $e->getMessage());
+            continue;
+        }
+
+        // Add to insertion array
+        $sqlArray[] = sprintf(
+            '(%s, %s, %s, %s)',
+            $pdoConn->quote($record["enrollid"]),
+            $pdoConn->quote(date("Y-m-d", strtotime($record["time"]))),
+            $pdoConn->quote(date("H:i:s", strtotime($record["time"]))),
+            $pdoConn->quote($id)
         );
-        $stmt->execute([
-            $record["enrollid"],
-            date("Y-m-d", strtotime($record["time"])),
-            date("H:i:s", strtotime($record["time"]))
-        ]);
 
-        if ($stmt->fetchColumn() == 0) {
-            // Add to SQL Array if not duplicate
-            $sqlArray[] = '("' . $record["enrollid"] . '", "' . date("Y-m-d", strtotime($record["time"])) . '", "' . date("H:i:s", strtotime($record["time"])) . '", "' . $id . '")';
-
-            // Fetch the user's phone and email based on punchingcode
-            $stmt = $pdoConn->prepare("SELECT phone_number, email FROM users WHERE punching_code = ?");
+        // Handle user notifications
+        try {
+            $stmt = $pdoConn->prepare("SELECT phone_number, email, name FROM users WHERE punching_code = ?");
             $stmt->execute([$record["enrollid"]]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user) {
-                $phoneNumber = $user['phone_number'];
-                $email = $user['email'];
-
+            if ($user && !empty($user['email'])) {
+                // Prepare notification data
+                $userName = !empty($user['name']) ? $user['name'] : 'Unknown User';
+                $punchTime = date("Y-m-d H:i:s", strtotime($record["time"]));
+                
                 // Send email notification
-                $subject = 'New record has been inserted';
-                // $message = 'Details: Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
-                $message = $message = 'Kindly note that the card bearer with Card Number: ' . $record["enrollid"] . ' just arrived at school';
-                sendEmail($email, $message, $subject);
+                $subject = 'Attendance Alert - New Record';
+				// %s.
+                $emailMessage = sprintf(
+                    'Dear Parent/Guardian,This is to notify you that %s (Card Number: %s) has been recorded at the school premises.',
+                    $userName,
+                    $record["enrollid"],
+                    $punchTime
+                );
+                
+                if (sendEmail($user['email'], $emailMessage, $subject)) {
+                    $successfulNotifications++;
+                    error_log("Email sent successfully to: " . $user['email']);
+                } else {
+                    error_log("Failed to send email to: " . $user['email']);
+                }
 
                 // Send SMS notification
-                // $smsMessage = 'Card Number: ' . $record["enrollid"] . ', Date: ' . date("Y-m-d", strtotime($record["time"])) . ', Time: ' . date("H:i:s", strtotime($record["time"]));
-                $smsMessage = 'Card Number: ' . $record["enrollid"];
-                sendSms($smsMessage, $phoneNumber);
+                if (!empty($user['phone_number'])) {
+                    $smsMessage = sprintf(
+                        'Attendance Alert: %s (Card: %s)',
+                        $userName,
+                        $record["enrollid"],
+                        // date("H:i", strtotime($record["time"]))
+                    );
+                    
+                    if (sendSms($smsMessage, $user['phone_number'])) {
+                        error_log("SMS sent successfully to: " . $user['phone_number']);
+                    } else {
+                        error_log("Failed to send SMS to: " . $user['phone_number']);
+                    }
+                }
             } else {
-                // Fallback in case no user is found (optional, depending on your need)
-                error_log("No user found for punching code: " . $record["enrollid"]);
+                error_log("No user found or missing email for punching code: " . $record["enrollid"]);
             }
+        } catch (PDOException $e) {
+            error_log("Database error during user lookup: " . $e->getMessage());
+        } catch (Exception $e) {
+            error_log("Error during notification process: " . $e->getMessage());
         }
     }
 
+    // Log processing summary
+    error_log(sprintf(
+        "Batch processing summary - Total: %d, Valid for insertion: %d, Batch duplicates: %d, DB duplicates: %d, Invalid: %d, Notifications sent: %d",
+        count($records),
+        count($sqlArray),
+        $duplicatesInBatch,
+        $duplicatesInDb,
+        $invalidRecords,
+        $successfulNotifications
+    ));
+
+    // Insert records if any are valid
     if (!empty($sqlArray)) {
         $sql2 = $sql . implode(",", $sqlArray);
 
         try {
+            $pdoConn->beginTransaction();
+            
             $stmt = $pdoConn->prepare($sql2);
             $exec = $stmt->execute();
+            
+            if ($exec) {
+                $insertedRows = $stmt->rowCount();
+                $pdoConn->commit();
+                
+                error_log("Successfully inserted $insertedRows records into database");
+                
+                $result = $sts
+                    ? '{"cmd":"getalllog","stn":false,"cloudtime":"' . date('Y-m-d H:i:s') . '","inserted":' . $insertedRows . '}'
+                    : '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '","inserted":' . $insertedRows . ',"notifications":' . $successfulNotifications . '}';
+                
+                return $result;
+            } else {
+                $pdoConn->rollback();
+                error_log("Database execution failed for batch insert");
+                return '{"ret":"sendlog","result":false,"reason":"Database execution failed"}';
+            }
         } catch (PDOException $e) {
-            // Log SQL error
-            error_log("SQL Error: " . $e->getMessage());
-            return '{"ret":"sendlog","result":false,"reason":"SQL Error"}';
-        }
-
-        if ($exec) {
-            $result = $sts
-                ? '{"cmd":"getalllog","stn":false,"cloudtime":"' . date('Y-m-d H:i:s') . '"}'
-                : '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '"}';
-            return $result;
-        } else {
-            return '{"ret":"sendlog","result":false,"reason":"Execution failed"}';
+            $pdoConn->rollback();
+            error_log("SQL Error during batch insert: " . $e->getMessage());
+            error_log("Failed SQL: " . $sql2);
+            return '{"ret":"sendlog","result":false,"reason":"SQL Error: ' . addslashes($e->getMessage()) . '"}';
         }
     }
 
-    return '{"ret":"sendlog","result":false,"reason":"No records to insert"}';
+    // Handle case where no records were inserted
+    $reason = "No new records to insert";
+    if ($duplicatesInBatch > 0 || $duplicatesInDb > 0) {
+        $reason .= " (duplicates filtered)";
+    }
+    if ($invalidRecords > 0) {
+        $reason .= " (invalid records found)";
+    }
+
+    error_log("Batch completed with no insertions: " . $reason);
+    
+    // Return success even if no records were inserted (this prevents the device from retrying)
+    return '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '","message":"' . $reason . '","notifications":' . $successfulNotifications . '}';
 }
+
 
 
 function getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn) {
