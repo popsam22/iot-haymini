@@ -23,6 +23,18 @@ while (ob_get_level()) {
     ob_end_flush();
 }
 
+function safe_output_flush() {
+    if (ob_get_level() > 0) {
+        ob_flush();
+    }
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+    flush();
+}
+
+
+
 // Handle GET requests or CLI calls
 // if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
 //     $action = $_GET['action'] ?? null;
@@ -181,7 +193,7 @@ $startData = date('md His_');
 $imgID=1;
 
 echo " start...$startData </br>";
-ob_flush();
+safe_output_flush();
 
 $bConnect=false;
 $startTime=microtime(true);
@@ -196,7 +208,7 @@ do {
 				$accept = socket_accept($socket);
 				socket_getpeername($accept, $address, $port);
 				echo "</br>accept : $address:$port ".date('His');
-				ob_flush();
+				safe_output_flush();
 				
 				$machines[] = $accept; //添加
 				$data["id{$address}_{$port}"]=''; //清空数据
@@ -233,7 +245,7 @@ do {
 						}
 						else 
 							echo "</br>shakehand failed ".$frame;
-						ob_flush();
+					safe_output_flush();
 						continue;
 					}
 					
@@ -329,7 +341,7 @@ do {
 								echo "</br>next:".$DataLen;
 							}
 							
-							ob_flush();
+					safe_output_flush();
 						}
 						else //长度错误
 						{
@@ -344,7 +356,7 @@ do {
 					//if($frame===false)
 					{
 						echo "</br>disconnected : $address:$port ".date('His')."</br>";
-						ob_flush();
+						safe_output_flush();
 						socket_close($ready);
 						unset($id["id{$address}_{$port}"]);
 						unset($data["id{$address}_{$port}"]);
@@ -455,7 +467,7 @@ function sendCmdToAll($retTxt)
 			}
 		}
 		echo "</br>【sendcmd】".$bufferCommand." cont=".$sendCount."</br>";
-		ob_flush();
+	safe_output_flush();
 		return $sendCount;
 	}
 	return 0;
@@ -484,7 +496,7 @@ function sendPingToAll()
 		}
 	}
 	echo "</br>【sendping】".ord($bufferCommand[0]).ord($bufferCommand[1]).$bufferCommand." cont=".$sendCount."/".date('His');;
-	ob_flush();
+	safe_output_flush();
 	return $sendCount;
 
 }
