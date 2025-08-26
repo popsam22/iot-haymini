@@ -17,6 +17,12 @@ if (php_sapi_name() === "cli") {
     $_GET = $options ?: [];
 }
 
+ini_set('output_buffering', 'off');
+ini_set('zlib.output_compression', false);
+while (ob_get_level()) {
+    ob_end_flush();
+}
+
 // Handle GET requests or CLI calls
 // if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
 //     $action = $_GET['action'] ?? null;
@@ -80,14 +86,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
     if ($action) {
         switch ($action) {
             case 'getLogs':
-                header('Content-Type: application/json');
                 echo getAllLogs();
+				exit;
                 break;
 
             case 'getLogsByPunchingCode':
                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
                 if ($punchingcode) {
-                    header('Content-Type: application/json');
+                   
                     echo getLogsByPunchingCode($punchingcode);
                 } else {
                     http_response_code(400);
@@ -106,7 +112,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
                 $email = filter_input(INPUT_GET, 'email');
 
                 if ($punching_code && $name && $phone && $email) {
-                    header('Content-Type: application/json');
                     echo json_encode(getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn));
                 } else {
                     http_response_code(400);
@@ -1050,8 +1055,6 @@ function store($records, $id, $sts = 0) {
     return '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '","message":"' . $reason . '","notifications":' . $successfulNotifications . '}';
 }
 
-
-
 function getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn) {
   //check if user exists first
     $stmt = $pdoConn->prepare("SELECT id FROM users WHERE punching_code = ?");
@@ -1074,6 +1077,7 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $pdoConn) {
 
 function getAllLogs() {
 	global $pdoConn;
+
 	try {
         $sql = 'SELECT punchingcode, date, time, Tid FROM tblt_timesheet ORDER BY date DESC, time DESC';
         $stmt = $pdoConn->prepare($sql);
@@ -1103,39 +1107,6 @@ function getLogsByPunchingCode($punchingCode) {
         return json_encode(['error' => $e->getMessage()]);
     }
 }
-
-// function getUserList() {
-//     global $socket; // Assuming you have a socket connection setup
-//     $userList = [];
-//     $from = 0;
-//     $to = 39;
-//     $stn = true;
-
-//     do {
-//         // Step 1: Send request to device
-//         $request = [
-//             "cmd" => "getuserlist",
-//             "stn" => $stn
-//         ];
-//         socket_write($socket, json_encode($request));
-
-//         // Step 2: Read response from the device
-//         $response = socket_read($socket, 2048);
-//         $data = json_decode($response, true);
-
-//         if ($data['result'] === true && $data['count'] > 0) {
-//             // Step 3: Append retrieved users to the user list
-//             $userList = array_merge($userList, $data['record']);
-//             $from += 40; // Increment to request the next batch
-//             $to += 40;
-//             $stn = false; // For subsequent requests
-//         } else {
-//             break; // Exit loop if no more records
-//         }
-//     } while ($data['count'] == 40); // Continue if we received a full package
-
-//     return json_encode(["status" => "success", "users" => $userList]);
-// }
 
 function exportLogsToExcel() {
     global $pdoConn;
@@ -1174,4 +1145,12 @@ function exportLogsToExcel() {
     $writer->save('php://output');
     exit;
 }
+
+function assignDeviceToOrg($pdoConn, $deviceSnOrId, $orgId) {
+    // post request accept either device id or serial number
+    $stmt = $pdoConn->prepare("UPDATE devices SET organization_id = ? WHERE id = ? OR sn = ?");
+    $stmt->execute([$orgId, $deviceSnOrId, $deviceSnOrId]);
+    return $stmt->rowCount() > 0;
+}
+
 ?>
