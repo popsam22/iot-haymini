@@ -272,12 +272,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
     } else {
         http_response_code(200);
         echo json_encode([
-            'message' => 'Welcome to the API',
-            'instructions' => [
-                'getLogs' => '/ws.php?action=getLogs',
-                'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
-                'exportLogs' => '/ws.php?action=exportLogs',
-						'getOrCreateUser' => '/ws.php?action=getOrCreateUser&punching_code={value}&name={value}&phone={value}&email={value}'
+            'message' => 'Welcome to the IoT Organization API',
+            'available_actions' => [
+                'getLogs',
+                'getLogsByPunchingCode',
+                'getLogsByOrganization',
+                'exportLogs',
+                'getOrCreateUser',
+                'activateUser',
+                'deactivateUser', 
+                'bulkCreateUsers',
+                'getUsersByOrganization',
+                'registerDevice',
+                'assignDeviceToOrganization',
+                'getDevicesByOrganization',
+                'updateDeviceStatus'
+            ],
+            'sample_usage' => [
+                'register_device' => '/ws.php?action=registerDevice&serial_number=DEV001&organization_id=1',
+                'create_user' => '/ws.php?action=getOrCreateUser&punching_code=EMP001&name=John&phone=123&email=john@test.com&organization_id=1',
+                'get_org_logs' => '/ws.php?action=getLogsByOrganization&organization_id=1'
             ]
         ]);
     }
