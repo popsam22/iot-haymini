@@ -316,7 +316,7 @@ $userData=array(); //用户列表
 $startData = date('md His_');
 $imgID=1;
 
-echo " start...$startData </br>";
+error_log("WebSocket server started at $startData");
 safe_output_flush();
 
 $bConnect=false;
@@ -331,7 +331,7 @@ do {
 			if ($ready === $socket) {
 				$accept = socket_accept($socket);
 				socket_getpeername($accept, $address, $port);
-				echo "</br>accept : $address:$port ".date('His');
+				error_log("Client connected: $address:$port " . date('His'));
 				safe_output_flush();
 				
 				$machines[] = $accept; //添加
@@ -364,11 +364,11 @@ do {
 						if(woshou($ready,$frame))
 						{
 							$constat["id{$address}_{$port}"]=true;
-							echo "</br>connected : $address:$port ".date('His');
+							error_log("WebSocket handshake completed: $address:$port " . date('His'));
 							
 						}
 						else 
-							echo "</br>shakehand failed ".$frame;
+							error_log("WebSocket handshake failed: " . $frame);
 					safe_output_flush();
 						continue;
 					}
@@ -462,14 +462,14 @@ do {
 							{
 								$DataRec=substr($DataRec,$nDataPos,$DataLen-$nDataPos);
 								$DataLen-=$nDataPos;
-								echo "</br>next:".$DataLen;
+								error_log("Processing next data chunk: " . $DataLen);
 							}
 							
 					safe_output_flush();
 						}
 						else //长度错误
 						{
-							echo "</br>err len:".$payloadlength;
+							error_log("Error - invalid payload length: " . $payloadlength);
 							break;
 						}
 						$NeedLen=2;
@@ -479,7 +479,7 @@ do {
 				}else{
 					//if($frame===false)
 					{
-						echo "</br>disconnected : $address:$port ".date('His')."</br>";
+						error_log("Client disconnected: $address:$port " . date('His'));
 						safe_output_flush();
 						socket_close($ready);
 						unset($id["id{$address}_{$port}"]);
@@ -505,7 +505,7 @@ do {
 		if(file_exists("./commands/cmd.txt")){
 			$packetCommand = file_get_contents("./commands/cmd.txt");
 			unlink("./commands/cmd.txt");
-			echo "</br></br>cmd:".$packetCommand;
+			error_log("Received command: " . $packetCommand);
 			
 			if($packetCommand==='exit')
 			{
@@ -590,7 +590,7 @@ function sendCmdToAll($retTxt)
 				}
 			}
 		}
-		echo "</br>【sendcmd】".$bufferCommand." cont=".$sendCount."</br>";
+		error_log("Sent command: " . $bufferCommand . " count=" . $sendCount);
 	safe_output_flush();
 		return $sendCount;
 	}
@@ -619,7 +619,7 @@ function sendPingToAll()
 			}
 		}
 	}
-	echo "</br>【sendping】".ord($bufferCommand[0]).ord($bufferCommand[1]).$bufferCommand." cont=".$sendCount."/".date('His');;
+	error_log("Sent ping: " . ord($bufferCommand[0]) . ord($bufferCommand[1]) . $bufferCommand . " count=" . $sendCount . "/" . date('His'));
 	safe_output_flush();
 	return $sendCount;
 
@@ -634,12 +634,10 @@ function onFrame($packet,$ready,$address, $port,$optcode)
 	
 	if($optcode==1 && $packet != '')
 	{
-		echo "</br>".$optcode.":";
-		echo strlen($packet);
-		if(strlen($packet)>200)
-			echo substr($packet,0,200);
-		else
-			echo $packet;
+		error_log("Processing packet - optcode: " . $optcode . ", length: " . strlen($packet));
+		if(strlen($packet) <= 200) {
+			error_log("Packet content: " . $packet);
+		}
 	}
 	else
 	{
@@ -654,7 +652,7 @@ function onFrame($packet,$ready,$address, $port,$optcode)
 			//echo " ret ping ".date('His');
 		}
 		else
-			echo("</br>type:".$optcode);
+			error_log("Packet type: " . $optcode);
 		return false;
 	}
 	$bReg=false;
@@ -683,7 +681,7 @@ function onFrame($packet,$ready,$address, $port,$optcode)
 					
 					$records =$packet['record'];
 					$userData=array_merge($userData,$records); //缓存用户列表。
-					echo "<br>count:".count($userData)." new:".count($records);
+					error_log("Processing records - existing: " . count($userData) . ", new: " . count($records));
 					//next
 					$count=$packet['count'];
 					if($count>0) //继续
@@ -776,7 +774,7 @@ function onFrame($packet,$ready,$address, $port,$optcode)
 			$code = 129;
 			$buffer = ($size<126?pack('CC', $code, $size):($size<65536?pack('CCn', $code, 126, $size):pack('CCNN', $code, 127,0, $size))).$retTxt;
 			socket_write($ready, $buffer);
-			echo "</br>write:".ord($buffer[0]).ord($buffer[1]).":".$retTxt;
+			error_log("Sending response: " . ord($buffer[0]) . ord($buffer[1]) . ":" . substr($retTxt, 0, 100));
 		}
 		return false;
 }
@@ -787,7 +785,7 @@ function saveImg($img)
 	$fileName="commands/".$startData.$imgID.".jpg";
 	$imgID++;
 	$file = file_put_contents($fileName,$img);
-	echo "</br>save file ".$fileName;
+	error_log("Saved image file: " . $fileName);
 }
 
 // function store($records, $id, $sts = 0) {
