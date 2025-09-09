@@ -943,7 +943,7 @@ function saveImg($img)
 // }
 
 function store($records, $deviceSerial, $sts = 0) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
 
     // Input validation
     if (empty($records) || !is_array($records)) {
@@ -1181,7 +1181,7 @@ function store($records, $deviceSerial, $sts = 0) {
 }
 
 function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id = null) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         // Input validation
@@ -1325,7 +1325,7 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
 
 // Enhanced user management functions
 function activateUser($punching_code) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         $stmt = $pdoConn->prepare("UPDATE users SET status = 'active', updated_at = NOW() WHERE punching_code = ?");
@@ -1344,7 +1344,7 @@ function activateUser($punching_code) {
 }
 
 function deactivateUser($punching_code) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         $stmt = $pdoConn->prepare("UPDATE users SET status = 'inactive', updated_at = NOW() WHERE punching_code = ?");
@@ -1363,7 +1363,7 @@ function deactivateUser($punching_code) {
 }
 
 function bulkCreateUsers($users_data, $organization_id = null) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         $results = [
@@ -1423,7 +1423,7 @@ function bulkCreateUsers($users_data, $organization_id = null) {
 }
 
 function registerDevice($serial_number, $organization_id, $device_name = null, $device_model = null, $ip_address = null) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         // Validate organization exists
@@ -1496,7 +1496,7 @@ function registerDevice($serial_number, $organization_id, $device_name = null, $
 }
 
 function assignDeviceToOrganization($serial_number, $organization_id) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         // Validate organization exists
@@ -1553,7 +1553,7 @@ function assignDeviceToOrganization($serial_number, $organization_id) {
 }
 
 function getDevicesByOrganization($organization_id) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         $stmt = $pdoConn->prepare("
@@ -1584,7 +1584,7 @@ function getDevicesByOrganization($organization_id) {
 }
 
 function updateDeviceStatus($serial_number, $status) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         // Check if device exists
@@ -1628,7 +1628,7 @@ function updateDeviceStatus($serial_number, $status) {
 }
 
 function getUsersByOrganization($organization_id) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         $stmt = $pdoConn->prepare("
@@ -1660,7 +1660,7 @@ function getUsersByOrganization($organization_id) {
 
 
 function getAllLogs($organization_id = null) {
-	global $pdoConn;
+	$pdoConn = getValidConnection();
 
 	try {
         if ($organization_id) {
@@ -1696,7 +1696,7 @@ function getAllLogs($organization_id = null) {
 }
 
 function getLogsByPunchingCode($punchingCode, $organization_id = null) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     try {
         if ($organization_id) {
             $stmt = $pdoConn->prepare("
@@ -1739,7 +1739,7 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
 }
 
 function getLogsByOrganization($organization_id, $date_from = null, $date_to = null) {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
     
     try {
         $sql = "
@@ -1798,7 +1798,7 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
 }
 
 function exportLogsToExcel() {
-    global $pdoConn;
+    $pdoConn = getValidConnection();
 
     // Step 1: Fetch data from the database
     $stmt = $pdoConn->query("SELECT * FROM tblt_timesheet");
