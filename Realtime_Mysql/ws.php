@@ -93,212 +93,257 @@ function safe_output_flush() {
 //     echo json_encode(['error' => 'Method not allowed']);
 // }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
-    $action = $_GET['action'] ?? null;
+// Set JSON response header
+header('Content-Type: application/json');
 
-    if ($action) {
-        switch ($action) {
-            case 'getLogs':
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-                echo getAllLogs($organization_id);
-				exit;
-                break;
+// Parse the URL path for RESTful routing
+$requestUri = $_SERVER['REQUEST_URI'];
+$requestMethod = $_SERVER['REQUEST_METHOD'];
+$path = parse_url($requestUri, PHP_URL_PATH);
+$query = parse_url($requestUri, PHP_URL_QUERY);
 
-            case 'getLogsByPunchingCode':
-                $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-                if ($punchingcode) {
-                   
-                    echo getLogsByPunchingCode($punchingcode, $organization_id);
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
-                }
-                break;
+// Parse query parameters
+parse_str($query ?? '', $queryParams);
 
-            case 'getLogsByOrganization':
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-                $date_from = filter_input(INPUT_GET, 'date_from');
-                $date_to = filter_input(INPUT_GET, 'date_to');
-                
-                if ($organization_id) {
-                    echo json_encode(getLogsByOrganization($organization_id, $date_from, $date_to));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameter (organization_id)']);
-                }
-                break;
-
-            case 'exportLogs':
-                exportLogsToExcel();
-                break;
-
-            case 'getOrCreateUser':
-                $punching_code = filter_input(INPUT_GET, 'punching_code');
-                $name = filter_input(INPUT_GET, 'name');
-                $phone = filter_input(INPUT_GET, 'phone');
-                $email = filter_input(INPUT_GET, 'email');
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-
-                if ($punching_code && $name && $phone && $email) {
-                    echo json_encode(getOrCreateUser($punching_code, $name, $phone, $email, $organization_id));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameters (punching_code, name, phone, email)']);
-                }
-                break;
-
-            case 'registerDevice':
-                $serial_number = filter_input(INPUT_GET, 'serial_number');
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-                $device_name = filter_input(INPUT_GET, 'device_name');
-                $device_model = filter_input(INPUT_GET, 'device_model');
-                $ip_address = filter_input(INPUT_GET, 'ip_address');
-
-                if ($serial_number && $organization_id) {
-                    echo json_encode(registerDevice($serial_number, $organization_id, $device_name, $device_model, $ip_address));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameters (serial_number, organization_id)']);
-                }
-                break;
-
-            case 'assignDeviceToOrganization':
-                $serial_number = filter_input(INPUT_GET, 'serial_number');
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-
-                if ($serial_number && $organization_id) {
-                    echo json_encode(assignDeviceToOrganization($serial_number, $organization_id));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameters (serial_number, organization_id)']);
-                }
-                break;
-
-            case 'getDevicesByOrganization':
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-
-                if ($organization_id) {
-                    echo json_encode(getDevicesByOrganization($organization_id));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameter (organization_id)']);
-                }
-                break;
-
-            case 'updateDeviceStatus':
-                $serial_number = filter_input(INPUT_GET, 'serial_number');
-                $status = filter_input(INPUT_GET, 'status');
-
-                if ($serial_number && $status && in_array($status, ['active', 'inactive', 'maintenance'])) {
-                    echo json_encode(updateDeviceStatus($serial_number, $status));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing or invalid parameters (serial_number, status: active/inactive/maintenance)']);
-                }
-                break;
-
-            case 'activateUser':
-                $punching_code = filter_input(INPUT_GET, 'punching_code');
-
-                if ($punching_code) {
-                    echo json_encode(activateUser($punching_code));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameter (punching_code)']);
-                }
-                break;
-
-            case 'deactivateUser':
-                $punching_code = filter_input(INPUT_GET, 'punching_code');
-
-                if ($punching_code) {
-                    echo json_encode(deactivateUser($punching_code));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameter (punching_code)']);
-                }
-                break;
-
-            case 'bulkCreateUsers':
-                // Get JSON data from request body
-                $input = file_get_contents('php://input');
-                $data = json_decode($input, true);
-                
-                if ($data && isset($data['users'])) {
-                    $users_data = $data['users'];
-                    $organization_id = isset($data['organization_id']) ? intval($data['organization_id']) : null;
-                    echo json_encode(bulkCreateUsers($users_data, $organization_id));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing or invalid JSON data. Expected format: {"users": [...], "organization_id": 1}']);
-                }
-                break;
-
-            case 'getUsersByOrganization':
-                $organization_id = filter_input(INPUT_GET, 'organization_id', FILTER_VALIDATE_INT);
-
-                if ($organization_id) {
-                    echo json_encode(getUsersByOrganization($organization_id));
-                } else {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Missing required parameter (organization_id)']);
-                }
-                break;
-
-            default:
-                // Invalid action provided
-                http_response_code(400);
-                echo json_encode([
-                    'error' => 'Invalid action',
-                    'available_actions' => [
-                        'getLogs',
-                        'getLogsByPunchingCode',
-                        'getLogsByOrganization',
-                        'exportLogs',
-                        'getOrCreateUser',
-                        'activateUser',
-                        'deactivateUser', 
-                        'bulkCreateUsers',
-                        'getUsersByOrganization',
-                        'registerDevice',
-                        'assignDeviceToOrganization',
-                        'getDevicesByOrganization',
-                        'updateDeviceStatus'
-                    ]
-                ]);
-                break;
-        }
-    } else {
-        http_response_code(200);
-        echo json_encode([
-            'message' => 'Welcome to the IoT Organization API',
-            'available_actions' => [
-                'getLogs',
-                'getLogsByPunchingCode',
-                'getLogsByOrganization',
-                'exportLogs',
-                'getOrCreateUser',
-                'activateUser',
-                'deactivateUser', 
-                'bulkCreateUsers',
-                'getUsersByOrganization',
-                'registerDevice',
-                'assignDeviceToOrganization',
-                'getDevicesByOrganization',
-                'updateDeviceStatus'
-            ],
-            'sample_usage' => [
-                'register_device' => '/ws.php?action=registerDevice&serial_number=DEV001&organization_id=1',
-                'create_user' => '/ws.php?action=getOrCreateUser&punching_code=EMP001&name=John&phone=123&email=john@test.com&organization_id=1',
-                'get_org_logs' => '/ws.php?action=getLogsByOrganization&organization_id=1'
-            ]
-        ]);
+// Get JSON input for POST/PUT requests
+$jsonInput = null;
+if (in_array($requestMethod, ['POST', 'PUT', 'PATCH'])) {
+    $rawInput = file_get_contents('php://input');
+    if (!empty($rawInput)) {
+        $jsonInput = json_decode($rawInput, true);
     }
-} else {
-    // Unsupported request method
-    http_response_code(405);
-    echo json_encode(['error' => 'Method not allowed']);
+}
+
+// RESTful routing
+switch ($requestMethod) {
+    
+    // === ORGANIZATIONS RESOURCE ===
+    case 'GET':
+        if (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
+            // GET /api/organizations/{id} - Get specific organization
+            $organizationId = (int)$matches[1];
+            echo json_encode(getOrganization($organizationId));
+            
+        } elseif (preg_match('/\/api\/organizations$/', $path)) {
+            // GET /api/organizations - Get all organizations
+            echo json_encode(getAllOrganizations());
+            
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/users$/', $path, $matches)) {
+            // GET /api/organizations/{id}/users - Get users by organization
+            $organizationId = (int)$matches[1];
+            echo json_encode(getUsersByOrganization($organizationId));
+            
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/devices$/', $path, $matches)) {
+            // GET /api/organizations/{id}/devices - Get devices by organization
+            $organizationId = (int)$matches[1];
+            echo json_encode(getDevicesByOrganization($organizationId));
+            
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/logs$/', $path, $matches)) {
+            // GET /api/organizations/{id}/logs - Get logs by organization
+            $organizationId = (int)$matches[1];
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo));
+            
+        // === USERS RESOURCE ===
+        } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
+            // GET /api/users/{punching_code} - Get user by punching code
+            $punchingCode = $matches[1];
+            $organizationId = $queryParams['organization_id'] ?? null;
+            echo getLogsByPunchingCode($punchingCode, $organizationId);
+            
+        // === DEVICES RESOURCE ===
+        } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
+            // GET /api/devices/{serial_number} - Get device details
+            $serialNumber = $matches[1];
+            echo json_encode(getDeviceDetails($serialNumber));
+            
+        // === LOGS RESOURCE ===
+        } elseif (preg_match('/\/api\/logs$/', $path)) {
+            // GET /api/logs - Get all logs (optionally filtered by organization)
+            $organizationId = $queryParams['organization_id'] ?? null;
+            echo getAllLogs($organizationId);
+            
+        } elseif (preg_match('/\/api\/logs\/export$/', $path)) {
+            // GET /api/logs/export - Export logs to Excel
+            exportLogsToExcel();
+            
+        // === API ROOT ===
+        } elseif (preg_match('/\/api\/?$/', $path) || $path === '/ws.php') {
+            // GET /api - API documentation
+            echo json_encode([
+                'message' => 'IoT Organization RESTful API',
+                'version' => '1.0',
+                'endpoints' => [
+                    'organizations' => [
+                        'GET /api/organizations' => 'List all organizations',
+                        'GET /api/organizations/{id}' => 'Get organization details',
+                        'POST /api/organizations' => 'Create organization',
+                        'PUT /api/organizations/{id}' => 'Update organization',
+                        'GET /api/organizations/{id}/users' => 'Get organization users',
+                        'GET /api/organizations/{id}/devices' => 'Get organization devices',
+                        'GET /api/organizations/{id}/logs' => 'Get organization logs'
+                    ],
+                    'users' => [
+                        'POST /api/users' => 'Create user',
+                        'POST /api/users/bulk' => 'Bulk create users',
+                        'GET /api/users/{punching_code}' => 'Get user logs',
+                        'PUT /api/users/{punching_code}/activate' => 'Activate user',
+                        'PUT /api/users/{punching_code}/deactivate' => 'Deactivate user'
+                    ],
+                    'devices' => [
+                        'POST /api/devices' => 'Register device',
+                        'GET /api/devices/{serial_number}' => 'Get device details',
+                        'PUT /api/devices/{serial_number}' => 'Update device',
+                        'PUT /api/devices/{serial_number}/organization' => 'Assign device to organization'
+                    ],
+                    'logs' => [
+                        'GET /api/logs' => 'Get all logs (filter with ?organization_id=1)',
+                        'GET /api/logs/export' => 'Export logs to Excel'
+                    ]
+                ]
+            ]);
+            
+        } else {
+            http_response_code(404);
+            echo json_encode(['error' => 'Endpoint not found']);
+        }
+        break;
+        
+    case 'POST':
+        if (preg_match('/\/api\/organizations$/', $path)) {
+            // POST /api/organizations - Create organization
+            if (!$jsonInput || empty($jsonInput['name']) || empty($jsonInput['contact_person']) || 
+                empty($jsonInput['email']) || empty($jsonInput['phone'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields: name, contact_person, email, phone']);
+                break;
+            }
+            
+            echo json_encode(createOrganization(
+                $jsonInput['name'],
+                $jsonInput['address'] ?? null,
+                $jsonInput['contact_person'],
+                $jsonInput['email'],
+                $jsonInput['phone']
+            ));
+            
+        } elseif (preg_match('/\/api\/users$/', $path)) {
+            // POST /api/users - Create user
+            if (!$jsonInput || empty($jsonInput['punching_code']) || empty($jsonInput['name']) || 
+                empty($jsonInput['phone']) || empty($jsonInput['email'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields: punching_code, name, phone, email']);
+                break;
+            }
+            
+            echo json_encode(getOrCreateUser(
+                $jsonInput['punching_code'],
+                $jsonInput['name'],
+                $jsonInput['phone'],
+                $jsonInput['email'],
+                $jsonInput['organization_id'] ?? null
+            ));
+            
+        } elseif (preg_match('/\/api\/users\/bulk$/', $path)) {
+            // POST /api/users/bulk - Bulk create users
+            if (!$jsonInput || !isset($jsonInput['users'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required field: users array']);
+                break;
+            }
+            
+            echo json_encode(bulkCreateUsers($jsonInput['users'], $jsonInput['organization_id'] ?? null));
+            
+        } elseif (preg_match('/\/api\/devices$/', $path)) {
+            // POST /api/devices - Register device
+            if (!$jsonInput || empty($jsonInput['serial_number']) || empty($jsonInput['organization_id'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields: serial_number, organization_id']);
+                break;
+            }
+            
+            echo json_encode(registerDevice(
+                $jsonInput['serial_number'],
+                $jsonInput['organization_id'],
+                $jsonInput['device_name'] ?? null,
+                $jsonInput['device_model'] ?? null,
+                $jsonInput['ip_address'] ?? null
+            ));
+            
+        } else {
+            http_response_code(404);
+            echo json_encode(['error' => 'Endpoint not found']);
+        }
+        break;
+        
+    case 'PUT':
+        if (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
+            // PUT /api/organizations/{id} - Update organization
+            $organizationId = (int)$matches[1];
+            
+            echo json_encode(updateOrganization(
+                $organizationId,
+                $jsonInput['name'] ?? null,
+                $jsonInput['address'] ?? null,
+                $jsonInput['contact_person'] ?? null,
+                $jsonInput['email'] ?? null,
+                $jsonInput['phone'] ?? null
+            ));
+            
+        } elseif (preg_match('/\/api\/users\/([^\/]+)\/activate$/', $path, $matches)) {
+            // PUT /api/users/{punching_code}/activate - Activate user
+            $punchingCode = $matches[1];
+            echo json_encode(activateUser($punchingCode));
+            
+        } elseif (preg_match('/\/api\/users\/([^\/]+)\/deactivate$/', $path, $matches)) {
+            // PUT /api/users/{punching_code}/deactivate - Deactivate user
+            $punchingCode = $matches[1];
+            echo json_encode(deactivateUser($punchingCode));
+            
+        } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
+            // PUT /api/devices/{serial_number} - Update device status
+            $serialNumber = $matches[1];
+            
+            if (!$jsonInput || empty($jsonInput['status'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required field: status']);
+                break;
+            }
+            
+            if (!in_array($jsonInput['status'], ['active', 'inactive', 'maintenance'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Invalid status. Must be: active, inactive, or maintenance']);
+                break;
+            }
+            
+            echo json_encode(updateDeviceStatus($serialNumber, $jsonInput['status']));
+            
+        } elseif (preg_match('/\/api\/devices\/([^\/]+)\/organization$/', $path, $matches)) {
+            // PUT /api/devices/{serial_number}/organization - Assign device to organization
+            $serialNumber = $matches[1];
+            
+            if (!$jsonInput || empty($jsonInput['organization_id'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required field: organization_id']);
+                break;
+            }
+            
+            echo json_encode(assignDeviceToOrganization($serialNumber, $jsonInput['organization_id']));
+            
+        } else {
+            http_response_code(404);
+            echo json_encode(['error' => 'Endpoint not found']);
+        }
+        break;
+        
+    default:
+        http_response_code(405);
+        echo json_encode([
+            'error' => 'Method not allowed',
+            'allowed_methods' => ['GET', 'POST', 'PUT']
+        ]);
+        break;
 }
 
 
@@ -1833,6 +1878,285 @@ function exportLogsToExcel() {
     $writer = new Xlsx($spreadsheet);
     $writer->save('php://output');
     exit;
+}
+
+// Organization Management Functions
+function createOrganization($name, $address, $contact_person, $email, $phone) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Input validation
+        if (empty($name) || empty($contact_person) || empty($email) || empty($phone)) {
+            return [
+                "status" => "error",
+                "message" => "Name, contact person, email, and phone are required"
+            ];
+        }
+        
+        // Check if organization with same name already exists
+        $stmt = $pdoConn->prepare("SELECT id FROM organizations WHERE name = ?");
+        $stmt->execute([$name]);
+        if ($stmt->fetch()) {
+            return [
+                "status" => "error",
+                "message" => "Organization with this name already exists"
+            ];
+        }
+        
+        // Create new organization
+        $stmt = $pdoConn->prepare("
+            INSERT INTO organizations (name, address, contact_person, email, phone, created_at) 
+            VALUES (?, ?, ?, ?, ?, NOW())
+        ");
+        
+        $stmt->execute([$name, $address, $contact_person, $email, $phone]);
+        $organization_id = $pdoConn->lastInsertId();
+        
+        error_log("Created new organization: $name (ID: $organization_id)");
+        
+        return [
+            "status" => "success",
+            "message" => "Organization created successfully",
+            "organization_id" => $organization_id,
+            "name" => $name
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in createOrganization: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error: " . $e->getMessage()
+        ];
+    }
+}
+
+function getOrganization($organization_id) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Get organization details
+        $stmt = $pdoConn->prepare("
+            SELECT id, name, address, contact_person, email, phone, 
+                   created_at as dateJoined, updated_at
+            FROM organizations 
+            WHERE id = ?
+        ");
+        $stmt->execute([$organization_id]);
+        $organization = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$organization) {
+            return [
+                "status" => "error",
+                "message" => "Organization not found"
+            ];
+        }
+        
+        // Get devices assigned to this organization
+        $stmt = $pdoConn->prepare("
+            SELECT id, serial_number, device_name, device_model, 
+                   ip_address, status, created_at
+            FROM devices 
+            WHERE organization_id = ?
+            ORDER BY created_at DESC
+        ");
+        $stmt->execute([$organization_id]);
+        $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Get users under this organization
+        $stmt = $pdoConn->prepare("
+            SELECT id, punching_code, name, email, phone_number, 
+                   status, created_at
+            FROM users 
+            WHERE organization_id = ?
+            ORDER BY created_at DESC
+        ");
+        $stmt->execute([$organization_id]);
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        return [
+            "status" => "success",
+            "message" => "Organization retrieved successfully",
+            "organization" => [
+                "id" => $organization['id'],
+                "name" => $organization['name'],
+                "address" => $organization['address'],
+                "contact_person" => $organization['contact_person'],
+                "email" => $organization['email'],
+                "phone" => $organization['phone'],
+                "dateJoined" => $organization['dateJoined'],
+                "updated_at" => $organization['updated_at'],
+                "devices_count" => count($devices),
+                "users_count" => count($users),
+                "devices" => $devices,
+                "users" => $users
+            ]
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in getOrganization: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error retrieving organization"
+        ];
+    }
+}
+
+function getAllOrganizations() {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Get all organizations with summary data
+        $stmt = $pdoConn->prepare("
+            SELECT o.id, o.name, o.address, o.contact_person, o.email, o.phone, 
+                   o.created_at as dateJoined, o.updated_at,
+                   COUNT(DISTINCT d.id) as device_count,
+                   COUNT(DISTINCT u.id) as user_count
+            FROM organizations o
+            LEFT JOIN devices d ON o.id = d.organization_id
+            LEFT JOIN users u ON o.id = u.organization_id
+            GROUP BY o.id
+            ORDER BY o.created_at DESC
+        ");
+        $stmt->execute();
+        $organizations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        return [
+            "status" => "success",
+            "message" => "Organizations retrieved successfully",
+            "total_count" => count($organizations),
+            "organizations" => $organizations
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in getAllOrganizations: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error retrieving organizations"
+        ];
+    }
+}
+
+function updateOrganization($organization_id, $name = null, $address = null, $contact_person = null, $email = null, $phone = null) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Check if organization exists
+        $stmt = $pdoConn->prepare("SELECT id, name FROM organizations WHERE id = ?");
+        $stmt->execute([$organization_id]);
+        $existingOrg = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$existingOrg) {
+            return [
+                "status" => "error",
+                "message" => "Organization not found"
+            ];
+        }
+        
+        // Build update query dynamically based on provided parameters
+        $updates = [];
+        $params = [];
+        
+        if (!empty($name)) {
+            // Check if another organization has this name
+            $stmt = $pdoConn->prepare("SELECT id FROM organizations WHERE name = ? AND id != ?");
+            $stmt->execute([$name, $organization_id]);
+            if ($stmt->fetch()) {
+                return [
+                    "status" => "error",
+                    "message" => "Another organization with this name already exists"
+                ];
+            }
+            $updates[] = "name = ?";
+            $params[] = $name;
+        }
+        
+        if ($address !== null) {
+            $updates[] = "address = ?";
+            $params[] = $address;
+        }
+        
+        if (!empty($contact_person)) {
+            $updates[] = "contact_person = ?";
+            $params[] = $contact_person;
+        }
+        
+        if (!empty($email)) {
+            $updates[] = "email = ?";
+            $params[] = $email;
+        }
+        
+        if (!empty($phone)) {
+            $updates[] = "phone = ?";
+            $params[] = $phone;
+        }
+        
+        if (empty($updates)) {
+            return [
+                "status" => "success",
+                "message" => "No changes provided"
+            ];
+        }
+        
+        // Add updated_at timestamp
+        $updates[] = "updated_at = NOW()";
+        $params[] = $organization_id; // For WHERE clause
+        
+        $sql = "UPDATE organizations SET " . implode(", ", $updates) . " WHERE id = ?";
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute($params);
+        
+        error_log("Updated organization ID $organization_id with " . count($updates) . " changes");
+        
+        return [
+            "status" => "success",
+            "message" => "Organization updated successfully",
+            "organization_id" => $organization_id,
+            "changes_made" => count($updates) - 1 // Exclude updated_at from count
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in updateOrganization: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error updating organization"
+        ];
+    }
+}
+
+function getDeviceDetails($serial_number) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Get device details with organization info
+        $stmt = $pdoConn->prepare("
+            SELECT d.*, o.name as organization_name
+            FROM devices d
+            LEFT JOIN organizations o ON d.organization_id = o.id
+            WHERE d.serial_number = ?
+        ");
+        $stmt->execute([$serial_number]);
+        $device = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$device) {
+            return [
+                "status" => "error",
+                "message" => "Device not found"
+            ];
+        }
+        
+        return [
+            "status" => "success",
+            "message" => "Device retrieved successfully",
+            "device" => $device
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in getDeviceDetails: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error retrieving device details"
+        ];
+    }
 }
 
 ?>
