@@ -160,13 +160,17 @@ switch ($requestMethod) {
             
         // === LOGS RESOURCE ===
         } elseif (preg_match('/\/api\/logs$/', $path)) {
-            // GET /api/logs - Get all logs (optionally filtered by organization)
-            $organizationId = $queryParams['organization_id'] ?? null;
-            echo getAllLogs($organizationId);
+            // GET /api/logs - Get all logs from all organizations
+            echo getAllLogs();
             
         } elseif (preg_match('/\/api\/logs\/export$/', $path)) {
             // GET /api/logs/export - Export logs to Excel
             exportLogsToExcel();
+            
+        } elseif (preg_match('/\/api\/logs\/device\/([^\/]+)$/', $path, $matches)) {
+            // GET /api/logs/device/{device_serial} - Get logs by device
+            $deviceSerial = $matches[1];
+            echo json_encode(getLogsByDevice($deviceSerial));
             
         // === API ROOT ===
         } elseif (preg_match('/\/api\/?$/', $path) || $path === '/ws.php') {
@@ -198,8 +202,11 @@ switch ($requestMethod) {
                         'PUT /api/devices/{serial_number}/organization' => 'Assign device to organization'
                     ],
                     'logs' => [
-                        'GET /api/logs' => 'Get all logs (filter with ?organization_id=1)',
-                        'GET /api/logs/export' => 'Export logs to Excel'
+                        'GET /api/logs' => 'Get all logs from all organizations',
+                        'GET /api/logs/export' => 'Export logs to Excel',
+                        'GET /api/logs/device/{device_serial}' => 'Get logs by device',
+                        'GET /api/users/{punching_code}' => 'Get logs by user (punching code)',
+                        'GET /api/organizations/{id}/logs' => 'Get logs by organization'
                     ]
                 ]
             ]);
@@ -225,7 +232,8 @@ switch ($requestMethod) {
                 $jsonInput['address'] ?? null,
                 $jsonInput['contact_person'],
                 $jsonInput['email'],
-                $jsonInput['phone']
+                $jsonInput['phone'],
+                $jsonInput['description'] ?? null
             ));
             
         } elseif (preg_match('/\/api\/users$/', $path)) {
@@ -288,7 +296,8 @@ switch ($requestMethod) {
                 $jsonInput['address'] ?? null,
                 $jsonInput['contact_person'] ?? null,
                 $jsonInput['email'] ?? null,
-                $jsonInput['phone'] ?? null
+                $jsonInput['phone'] ?? null,
+                $jsonInput['description'] ?? null
             ));
             
         } elseif (preg_match('/\/api\/users\/([^\/]+)\/activate$/', $path, $matches)) {
@@ -1704,35 +1713,24 @@ function getUsersByOrganization($organization_id) {
 }
 
 
-function getAllLogs($organization_id = null) {
+function getAllLogs() {
 	$pdoConn = getValidConnection();
 
 	try {
-        if ($organization_id) {
-            $sql = 'SELECT t.*, u.name, o.name as organization_name 
-                    FROM tblt_timesheet t
-                    LEFT JOIN users u ON t.punchingcode = u.punching_code
-                    LEFT JOIN organizations o ON t.organization_id = o.id
-                    WHERE t.organization_id = ?
-                    ORDER BY t.date DESC, t.time DESC';
-            $stmt = $pdoConn->prepare($sql);
-            $stmt->execute([$organization_id]);
-        } else {
-            $sql = 'SELECT t.*, u.name, o.name as organization_name 
-                    FROM tblt_timesheet t
-                    LEFT JOIN users u ON t.punchingcode = u.punching_code
-                    LEFT JOIN organizations o ON t.organization_id = o.id
-                    ORDER BY t.date DESC, t.time DESC';
-            $stmt = $pdoConn->prepare($sql);
-            $stmt->execute();
-        }
+        $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid, 
+                       u.id as user_id, t.organization_id, u.name, o.name as organization_name 
+                FROM tblt_timesheet t
+                LEFT JOIN users u ON t.punchingcode = u.punching_code
+                LEFT JOIN organizations o ON t.organization_id = o.id
+                ORDER BY t.date DESC, t.time DESC';
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute();
         
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         // Return the logs in JSON format
         return json_encode([
             'logs' => $logs,
-            'organization_id' => $organization_id,
             'total_count' => count($logs)
         ]);
     } catch (PDOException $e) {
@@ -1881,7 +1879,7 @@ function exportLogsToExcel() {
 }
 
 // Organization Management Functions
-function createOrganization($name, $address, $contact_person, $email, $phone) {
+function createOrganization($name, $address, $contact_person, $email, $phone, $description = null) {
     $pdoConn = getValidConnection();
     
     try {
@@ -1905,11 +1903,11 @@ function createOrganization($name, $address, $contact_person, $email, $phone) {
         
         // Create new organization
         $stmt = $pdoConn->prepare("
-            INSERT INTO organizations (name, address, contact_person, email, phone, created_at) 
-            VALUES (?, ?, ?, ?, ?, NOW())
+            INSERT INTO organizations (name, description, address, contact_person, email, phone) 
+            VALUES (?, ?, ?, ?, ?, ?)
         ");
         
-        $stmt->execute([$name, $address, $contact_person, $email, $phone]);
+        $stmt->execute([$name, $description, $address, $contact_person, $email, $phone]);
         $organization_id = $pdoConn->lastInsertId();
         
         error_log("Created new organization: $name (ID: $organization_id)");
@@ -1936,7 +1934,7 @@ function getOrganization($organization_id) {
     try {
         // Get organization details
         $stmt = $pdoConn->prepare("
-            SELECT id, name, address, contact_person, email, phone, 
+            SELECT id, name, description, address, contact_person, email, phone, 
                    created_at as dateJoined, updated_at
             FROM organizations 
             WHERE id = ?
@@ -1979,6 +1977,7 @@ function getOrganization($organization_id) {
             "organization" => [
                 "id" => $organization['id'],
                 "name" => $organization['name'],
+                "description" => $organization['description'],
                 "address" => $organization['address'],
                 "contact_person" => $organization['contact_person'],
                 "email" => $organization['email'],
@@ -2007,7 +2006,7 @@ function getAllOrganizations() {
     try {
         // Get all organizations with summary data
         $stmt = $pdoConn->prepare("
-            SELECT o.id, o.name, o.address, o.contact_person, o.email, o.phone, 
+            SELECT o.id, o.name, o.description, o.address, o.contact_person, o.email, o.phone, 
                    o.created_at as dateJoined, o.updated_at,
                    COUNT(DISTINCT d.id) as device_count,
                    COUNT(DISTINCT u.id) as user_count
@@ -2036,7 +2035,7 @@ function getAllOrganizations() {
     }
 }
 
-function updateOrganization($organization_id, $name = null, $address = null, $contact_person = null, $email = null, $phone = null) {
+function updateOrganization($organization_id, $name = null, $address = null, $contact_person = null, $email = null, $phone = null, $description = null) {
     $pdoConn = getValidConnection();
     
     try {
@@ -2088,6 +2087,11 @@ function updateOrganization($organization_id, $name = null, $address = null, $co
         if (!empty($phone)) {
             $updates[] = "phone = ?";
             $params[] = $phone;
+        }
+        
+        if ($description !== null) {
+            $updates[] = "description = ?";
+            $params[] = $description;
         }
         
         if (empty($updates)) {
@@ -2155,6 +2159,39 @@ function getDeviceDetails($serial_number) {
         return [
             "status" => "error",
             "message" => "Database error retrieving device details"
+        ];
+    }
+}
+
+function getLogsByDevice($device_serial) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid, 
+                       u.id as user_id, t.organization_id, u.name, o.name as organization_name 
+                FROM tblt_timesheet t
+                LEFT JOIN users u ON t.punchingcode = u.punching_code
+                LEFT JOIN organizations o ON t.organization_id = o.id
+                WHERE t.Tid = ?
+                ORDER BY t.date DESC, t.time DESC';
+        
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute([$device_serial]);
+        $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        return [
+            "status" => "success",
+            "message" => "Logs retrieved successfully",
+            "device_serial" => $device_serial,
+            "total_count" => count($logs),
+            "logs" => $logs
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in getLogsByDevice: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error retrieving logs"
         ];
     }
 }
