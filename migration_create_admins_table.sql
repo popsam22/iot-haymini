@@ -1,5 +1,4 @@
 -- Migration: Create admins table and default super admin
--- Run this SQL to add authentication system to your database
 
 -- Step 1: Create admins table
 CREATE TABLE admins (
