@@ -1,6 +1,6 @@
 <?php
 // Setup script to create default super admin account
-require_once 'ws.php';
+require_once 'functions.php';
 
 echo "Setting up default super admin account...\n";
 

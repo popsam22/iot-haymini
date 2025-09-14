@@ -15,7 +15,7 @@ $dotenv->load();
 error_reporting(E_ALL);
 
 // JWT Configuration
-define('JWT_SECRET', $_ENV['JWT_SECRET'] ?? 'AeFCfi9HELiSFoie4MV');
+define('JWT_SECRET', $_ENV['JWT_SECRET']);
 define('JWT_ALGORITHM', 'HS256');
 define('JWT_EXPIRE_HOURS', 24);
 
@@ -41,10 +41,6 @@ function safe_output_flush() {
     }
     flush();
 }
-
-// ===============================
-// AUTHENTICATION HELPER FUNCTIONS
-// ===============================
 
 function validatePassword($password) {
     if (strlen($password) < 8) {
@@ -133,12 +129,10 @@ function requireSuperAdmin() {
 function requireOrgAccess($organizationId) {
     $user = requireAuth();
     
-    // Super admin has access to all organizations
     if ($user['role'] === 'super_admin') {
         return $user;
     }
     
-    // Regular admin can only access their assigned organization
     if ($user['role'] === 'admin' && $user['organization_id'] != $organizationId) {
         http_response_code(403);
         echo json_encode(['error' => 'Access denied to this organization']);
