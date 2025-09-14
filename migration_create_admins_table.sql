@@ -13,13 +13,7 @@ CREATE TABLE admins (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     -- Foreign key constraint
-    CONSTRAINT fk_admin_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    
-    -- Ensure admin role has organization_id, super_admin doesn't
-    CONSTRAINT chk_admin_org CHECK (
-        (role = 'super_admin' AND organization_id IS NULL) OR 
-        (role = 'admin' AND organization_id IS NOT NULL)
-    )
+    CONSTRAINT fk_admin_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
 );
 
 -- Step 2: Create indexes for performance
@@ -29,10 +23,8 @@ CREATE INDEX idx_admins_role ON admins(role);
 CREATE INDEX idx_admins_organization ON admins(organization_id);
 
 -- Step 3: Insert default super admin account
--- Password: 'Admin@2024' (hashed with PHP password_hash)
--- You'll need to update this with actual hash after running PHP password_hash('Admin@2024', PASSWORD_DEFAULT)
-INSERT INTO admins (username, email, password_hash, role, status) VALUES 
-('super_admin', 'super.admin@haymini.net', '$2y$10$placeholder_will_be_replaced', 'super_admin', 'active');
+-- Run the setup script instead: php setup_default_admin.php
+-- Or call the API endpoint: POST /api/setup/default-admin
 
 -- Step 4: Show table structure
 DESCRIBE admins;

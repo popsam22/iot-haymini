@@ -1,6 +1,6 @@
 <?php
 // Setup script to create default super admin account
-require_once 'Realtime_Mysql/ws.php';
+require_once 'ws.php';
 
 echo "Setting up default super admin account...\n";
 
