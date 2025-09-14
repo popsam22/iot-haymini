@@ -19,6 +19,21 @@ define('JWT_SECRET', $_ENV['JWT_SECRET']);
 define('JWT_ALGORITHM', 'HS256');
 define('JWT_EXPIRE_HOURS', 24);
 
+// Set CORS headers to allow cross-origin requests from frontend
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Max-Age: 86400');
+
+// Handle preflight OPTIONS request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Set content type for JSON responses
+header('Content-Type: application/json');
+
 if (php_sapi_name() === "cli") {
     // Parse CLI options into $_GET
     $options = getopt("", ["action:", "punchingcode:"]);
