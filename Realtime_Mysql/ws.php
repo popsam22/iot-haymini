@@ -7,9 +7,17 @@ require __DIR__ . '/../vendor/autoload.php';
 use Dotenv\Dotenv;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+
 $dotenv = Dotenv::createImmutable(__DIR__. '/../');
 $dotenv->load();
 error_reporting(E_ALL);
+
+// JWT Configuration
+define('JWT_SECRET', $_ENV['JWT_SECRET'] ?? 'AeFCfi9HELiSFoie4MV');
+define('JWT_ALGORITHM', 'HS256');
+define('JWT_EXPIRE_HOURS', 24);
 
 if (php_sapi_name() === "cli") {
     // Parse CLI options into $_GET
@@ -34,7 +42,116 @@ function safe_output_flush() {
     flush();
 }
 
+// ===============================
+// AUTHENTICATION HELPER FUNCTIONS
+// ===============================
 
+function validatePassword($password) {
+    if (strlen($password) < 8) {
+        return "Password must be at least 8 characters long";
+    }
+    
+    if (!preg_match('/[A-Z]/', $password)) {
+        return "Password must contain at least one uppercase letter";
+    }
+    
+    if (!preg_match('/[a-z]/', $password)) {
+        return "Password must contain at least one lowercase letter";
+    }
+    
+    if (!preg_match('/[0-9]/', $password)) {
+        return "Password must contain at least one number";
+    }
+    
+    if (!preg_match('/[^A-Za-z0-9]/', $password)) {
+        return "Password must contain at least one symbol";
+    }
+    
+    return true;
+}
+
+function generateJWT($adminData) {
+    $payload = [
+        'iss' => 'haymini-iot',
+        'aud' => 'haymini-iot-api',
+        'iat' => time(),
+        'exp' => time() + (JWT_EXPIRE_HOURS * 3600),
+        'admin_id' => $adminData['id'],
+        'username' => $adminData['username'],
+        'email' => $adminData['email'],
+        'role' => $adminData['role'],
+        'organization_id' => $adminData['organization_id']
+    ];
+    
+    return JWT::encode($payload, JWT_SECRET, JWT_ALGORITHM);
+}
+
+function validateJWT($token) {
+    try {
+        $decoded = JWT::decode($token, new Key(JWT_SECRET, JWT_ALGORITHM));
+        return (array) $decoded;
+    } catch (Exception $e) {
+        error_log("JWT validation error: " . $e->getMessage());
+        return false;
+    }
+}
+
+function requireAuth() {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? null;
+    
+    if (!$authHeader || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Authorization token required']);
+        exit;
+    }
+    
+    $token = $matches[1];
+    $payload = validateJWT($token);
+    
+    if (!$payload) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Invalid or expired token']);
+        exit;
+    }
+    
+    return $payload;
+}
+
+function requireSuperAdmin() {
+    $user = requireAuth();
+    
+    if ($user['role'] !== 'super_admin') {
+        http_response_code(403);
+        echo json_encode(['error' => 'Super admin access required']);
+        exit;
+    }
+    
+    return $user;
+}
+
+function requireOrgAccess($organizationId) {
+    $user = requireAuth();
+    
+    // Super admin has access to all organizations
+    if ($user['role'] === 'super_admin') {
+        return $user;
+    }
+    
+    // Regular admin can only access their assigned organization
+    if ($user['role'] === 'admin' && $user['organization_id'] != $organizationId) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Access denied to this organization']);
+        exit;
+    }
+    
+    return $user;
+}
+
+function getCurrentUser() {
+    $user = requireAuth();
+    return $user;
+}
 
 // Handle GET requests or CLI calls
 // if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
@@ -117,9 +234,24 @@ if (in_array($requestMethod, ['POST', 'PUT', 'PATCH'])) {
 // RESTful routing
 switch ($requestMethod) {
     
-    // === ORGANIZATIONS RESOURCE ===
+    // === AUTHENTICATION & RESOURCES ===
     case 'GET':
-        if (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
+        if (preg_match('/\/api\/auth\/me$/', $path)) {
+            // GET /api/auth/me - Get current user info
+            $user = getCurrentUser();
+            echo json_encode([
+                'status' => 'success',
+                'user' => [
+                    'id' => $user['admin_id'],
+                    'username' => $user['username'],
+                    'email' => $user['email'],
+                    'role' => $user['role'],
+                    'organization_id' => $user['organization_id']
+                ]
+            ]);
+            
+    // === ORGANIZATIONS RESOURCE ===
+        } elseif (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
             // GET /api/organizations/{id} - Get specific organization
             $organizationId = (int)$matches[1];
             echo json_encode(getOrganization($organizationId));
@@ -169,8 +301,14 @@ switch ($requestMethod) {
             
         } elseif (preg_match('/\/api\/logs\/device\/([^\/]+)$/', $path, $matches)) {
             // GET /api/logs/device/{device_serial} - Get logs by device
+            requireAuth();
             $deviceSerial = $matches[1];
             echo json_encode(getLogsByDevice($deviceSerial));
+            
+        } elseif (preg_match('/\/api\/admins$/', $path)) {
+            // GET /api/admins - List all admins (super admin only)
+            requireSuperAdmin();
+            echo json_encode(getAllAdmins());
             
         // === API ROOT ===
         } elseif (preg_match('/\/api\/?$/', $path) || $path === '/ws.php') {
@@ -218,7 +356,24 @@ switch ($requestMethod) {
         break;
         
     case 'POST':
-        if (preg_match('/\/api\/organizations$/', $path)) {
+        if (preg_match('/\/api\/auth\/login$/', $path)) {
+            // POST /api/auth/login - Login
+            if (!$jsonInput || empty($jsonInput['email']) || empty($jsonInput['password'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Email and password are required']);
+                break;
+            }
+            
+            echo json_encode(loginAdmin($jsonInput['email'], $jsonInput['password']));
+            
+        } elseif (preg_match('/\/api\/auth\/logout$/', $path)) {
+            // POST /api/auth/logout - Logout (token-based, so just return success)
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Logged out successfully'
+            ]);
+            
+        } elseif (preg_match('/\/api\/organizations$/', $path)) {
             // POST /api/organizations - Create organization
             if (!$jsonInput || empty($jsonInput['name']) || empty($jsonInput['contact_person']) || 
                 empty($jsonInput['email']) || empty($jsonInput['phone'])) {
@@ -265,6 +420,7 @@ switch ($requestMethod) {
             
         } elseif (preg_match('/\/api\/devices$/', $path)) {
             // POST /api/devices - Register device
+            requireAuth(); // Require authentication
             if (!$jsonInput || empty($jsonInput['serial_number']) || empty($jsonInput['organization_id'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Missing required fields: serial_number, organization_id']);
@@ -278,6 +434,28 @@ switch ($requestMethod) {
                 $jsonInput['device_model'] ?? null,
                 $jsonInput['ip_address'] ?? null
             ));
+            
+        } elseif (preg_match('/\/api\/admins$/', $path)) {
+            // POST /api/admins - Create admin (super admin only)
+            requireSuperAdmin();
+            if (!$jsonInput || empty($jsonInput['username']) || empty($jsonInput['email']) || 
+                empty($jsonInput['password']) || empty($jsonInput['role'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields: username, email, password, role']);
+                break;
+            }
+            
+            echo json_encode(createAdmin(
+                $jsonInput['username'],
+                $jsonInput['email'],
+                $jsonInput['password'],
+                $jsonInput['role'],
+                $jsonInput['organization_id'] ?? null
+            ));
+            
+        } elseif (preg_match('/\/api\/setup\/default-admin$/', $path)) {
+            // POST /api/setup/default-admin - Create default super admin (no auth required)
+            echo json_encode(createDefaultSuperAdmin());
             
         } else {
             http_response_code(404);
@@ -330,6 +508,7 @@ switch ($requestMethod) {
             
         } elseif (preg_match('/\/api\/devices\/([^\/]+)\/organization$/', $path, $matches)) {
             // PUT /api/devices/{serial_number}/organization - Assign device to organization
+            requireAuth();
             $serialNumber = $matches[1];
             
             if (!$jsonInput || empty($jsonInput['organization_id'])) {
@@ -339,6 +518,19 @@ switch ($requestMethod) {
             }
             
             echo json_encode(assignDeviceToOrganization($serialNumber, $jsonInput['organization_id']));
+            
+        } elseif (preg_match('/\/api\/admins\/(\d+)\/password$/', $path, $matches)) {
+            // PUT /api/admins/{id}/password - Update admin password (super admin only)
+            requireSuperAdmin();
+            $adminId = (int)$matches[1];
+            
+            if (!$jsonInput || empty($jsonInput['password'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required field: password']);
+                break;
+            }
+            
+            echo json_encode(updateAdminPassword($adminId, $jsonInput['password']));
             
         } else {
             http_response_code(404);
@@ -2192,6 +2384,246 @@ function getLogsByDevice($device_serial) {
         return [
             "status" => "error",
             "message" => "Database error retrieving logs"
+        ];
+    }
+}
+
+// ===============================
+// AUTHENTICATION FUNCTIONS
+// ===============================
+
+function loginAdmin($email, $password) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Get admin by email
+        $stmt = $pdoConn->prepare("
+            SELECT a.*, o.name as organization_name 
+            FROM admins a
+            LEFT JOIN organizations o ON a.organization_id = o.id
+            WHERE a.email = ? AND a.status = 'active'
+        ");
+        $stmt->execute([$email]);
+        $admin = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            return [
+                'status' => 'error',
+                'message' => 'Invalid email or password'
+            ];
+        }
+        
+        // Generate JWT token
+        $token = generateJWT($admin);
+        
+        error_log("Admin login successful: " . $admin['email']);
+        
+        return [
+            'status' => 'success',
+            'message' => 'Login successful',
+            'token' => $token,
+            'user' => [
+                'id' => $admin['id'],
+                'username' => $admin['username'],
+                'email' => $admin['email'],
+                'role' => $admin['role'],
+                'organization_id' => $admin['organization_id'],
+                'organization_name' => $admin['organization_name'] ?? null
+            ]
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in loginAdmin: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Login failed due to server error'
+        ];
+    }
+}
+
+function createAdmin($username, $email, $password, $role, $organizationId = null) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Validate password
+        $passwordValidation = validatePassword($password);
+        if ($passwordValidation !== true) {
+            return [
+                'status' => 'error',
+                'message' => $passwordValidation
+            ];
+        }
+        
+        // Validate role and organization assignment
+        if ($role === 'super_admin' && $organizationId !== null) {
+            return [
+                'status' => 'error',
+                'message' => 'Super admin cannot be assigned to an organization'
+            ];
+        }
+        
+        if ($role === 'admin' && $organizationId === null) {
+            return [
+                'status' => 'error',
+                'message' => 'Admin must be assigned to an organization'
+            ];
+        }
+        
+        // Check if email or username already exists
+        $stmt = $pdoConn->prepare("SELECT id FROM admins WHERE email = ? OR username = ?");
+        $stmt->execute([$email, $username]);
+        if ($stmt->fetch()) {
+            return [
+                'status' => 'error',
+                'message' => 'Email or username already exists'
+            ];
+        }
+        
+        // Hash password
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        
+        // Create admin
+        $stmt = $pdoConn->prepare("
+            INSERT INTO admins (username, email, password_hash, role, organization_id, status) 
+            VALUES (?, ?, ?, ?, ?, 'active')
+        ");
+        
+        $stmt->execute([$username, $email, $passwordHash, $role, $organizationId]);
+        $adminId = $pdoConn->lastInsertId();
+        
+        error_log("Created new admin: $email (Role: $role, ID: $adminId)");
+        
+        return [
+            'status' => 'success',
+            'message' => 'Admin created successfully',
+            'admin_id' => $adminId
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in createAdmin: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to create admin due to server error'
+        ];
+    }
+}
+
+function getAllAdmins() {
+    $pdoConn = getValidConnection();
+    
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT a.id, a.username, a.email, a.role, a.organization_id, a.status, 
+                   a.created_at, a.updated_at, o.name as organization_name
+            FROM admins a
+            LEFT JOIN organizations o ON a.organization_id = o.id
+            ORDER BY a.created_at DESC
+        ");
+        $stmt->execute();
+        $admins = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        return [
+            'status' => 'success',
+            'message' => 'Admins retrieved successfully',
+            'total_count' => count($admins),
+            'admins' => $admins
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in getAllAdmins: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve admins'
+        ];
+    }
+}
+
+function updateAdminPassword($adminId, $newPassword) {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Validate password
+        $passwordValidation = validatePassword($newPassword);
+        if ($passwordValidation !== true) {
+            return [
+                'status' => 'error',
+                'message' => $passwordValidation
+            ];
+        }
+        
+        // Hash new password
+        $passwordHash = password_hash($newPassword, PASSWORD_DEFAULT);
+        
+        // Update password
+        $stmt = $pdoConn->prepare("
+            UPDATE admins 
+            SET password_hash = ?, updated_at = NOW() 
+            WHERE id = ?
+        ");
+        
+        $stmt->execute([$passwordHash, $adminId]);
+        
+        if ($stmt->rowCount() > 0) {
+            error_log("Updated password for admin ID: $adminId");
+            return [
+                'status' => 'success',
+                'message' => 'Password updated successfully'
+            ];
+        } else {
+            return [
+                'status' => 'error',
+                'message' => 'Admin not found'
+            ];
+        }
+        
+    } catch (PDOException $e) {
+        error_log("Database error in updateAdminPassword: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to update password'
+        ];
+    }
+}
+
+function createDefaultSuperAdmin() {
+    $pdoConn = getValidConnection();
+    
+    try {
+        // Check if super admin already exists
+        $stmt = $pdoConn->prepare("SELECT id FROM admins WHERE email = ?");
+        $stmt->execute(['super.admin@haymini.net']);
+        if ($stmt->fetch()) {
+            return [
+                'status' => 'exists',
+                'message' => 'Default super admin already exists'
+            ];
+        }
+        
+        // Create default super admin with password 'Admin@2024'
+        $password = 'Admin@2024';
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        
+        $stmt = $pdoConn->prepare("
+            INSERT INTO admins (username, email, password_hash, role, status) 
+            VALUES (?, ?, ?, 'super_admin', 'active')
+        ");
+        
+        $stmt->execute(['super_admin', 'super.admin@haymini.net', $passwordHash]);
+        
+        error_log("Created default super admin: super.admin@haymini.net");
+        
+        return [
+            'status' => 'success',
+            'message' => 'Default super admin created successfully',
+            'email' => 'super.admin@haymini.net',
+            'password' => $password
+        ];
+        
+    } catch (PDOException $e) {
+        error_log("Database error in createDefaultSuperAdmin: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to create default super admin'
         ];
     }
 }
