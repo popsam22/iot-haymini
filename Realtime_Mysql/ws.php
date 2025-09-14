@@ -558,13 +558,17 @@ switch ($requestMethod) {
 
 
 
-set_time_limit(0);
-ob_implicit_flush();
+// Only start WebSocket server if not handling API requests
+$isApiRequest = isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], '/api/') !== false;
 
-//date_default_timezone_set('Asia/Calcutta');
-//date_default_timezone_set('PRC');
+if (!$isApiRequest) {
+    set_time_limit(0);
+    ob_implicit_flush();
 
-$socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+    //date_default_timezone_set('Asia/Calcutta');
+    //date_default_timezone_set('PRC');
+
+    $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
 if(socket_bind($socket, $SERVER_IP, $SERVER_PORT)==false)
 {
 	var_dump($SERVER_PORT);
@@ -795,7 +799,9 @@ do {
 	
 } while (true);
 socket_close($socket);
- function woshou($socket,$buffer){
+} // End of WebSocket server code
+
+function woshou($socket,$buffer){
         //截取Sec-WebSocket-Key的值并加密，其中$key后面的一部分258EAFA5-E914-47DA-95CA-C5AB0DC85B11字符串应该是固定的
         $buf  = substr($buffer,strpos($buffer,'Sec-WebSocket-Key:')+18);
         $key  = trim(substr($buf,0,strpos($buf,"\r\n")));
