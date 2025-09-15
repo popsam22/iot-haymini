@@ -108,10 +108,33 @@ function validateJWT($token) {
 }
 
 function requireAuth() {
-    $headers = getallheaders();
-    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? null;
+    // Fallback for getallheaders() which might not work on all server configurations
+    $headers = array();
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+    } else {
+        // Fallback method for servers without getallheaders()
+        foreach ($_SERVER as $key => $value) {
+            if (strpos($key, 'HTTP_') === 0) {
+                $header = str_replace('_', '-', strtolower(substr($key, 5)));
+                $header = ucwords($header, '-');
+                $headers[$header] = $value;
+            }
+        }
+    }
+    
+    // Try multiple possible header formats
+    $authHeader = $headers['Authorization'] ?? 
+                  $headers['authorization'] ?? 
+                  $_SERVER['HTTP_AUTHORIZATION'] ?? 
+                  null;
     
     if (!$authHeader || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        // Debug logging - can be removed in production
+        error_log("Auth failed - Headers received: " . json_encode($headers));
+        error_log("Auth failed - HTTP_AUTHORIZATION: " . ($_SERVER['HTTP_AUTHORIZATION'] ?? 'not set'));
+        error_log("Auth failed - authHeader value: " . ($authHeader ?? 'null'));
+        
         http_response_code(401);
         echo json_encode(['error' => 'Authorization token required']);
         exit;
