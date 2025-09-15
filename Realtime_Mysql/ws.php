@@ -129,7 +129,18 @@ function requireAuth() {
                   $_SERVER['HTTP_AUTHORIZATION'] ?? 
                   $headers['X-Authorization'] ?? 
                   $_SERVER['HTTP_X_AUTHORIZATION'] ??
+                  $headers['X-Auth-Token'] ?? 
+                  $_SERVER['HTTP_X_AUTH_TOKEN'] ??
                   null;
+    
+    // Fallback: check if token is in request body (for testing purposes)
+    if (!$authHeader) {
+        $input = file_get_contents('php://input');
+        $jsonData = json_decode($input, true);
+        if ($jsonData && isset($jsonData['_token'])) {
+            $authHeader = 'Bearer ' . $jsonData['_token'];
+        }
+    }
     
     if (!$authHeader || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
         // Debug logging - can be removed in production
