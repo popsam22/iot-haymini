@@ -125,29 +125,10 @@ function requireAuth() {
     
     // Try multiple possible header formats
     $authHeader = $headers['Authorization'] ?? 
-                  $headers['authorization'] ?? 
-                  $_SERVER['HTTP_AUTHORIZATION'] ?? 
-                  $headers['X-Authorization'] ?? 
-                  $_SERVER['HTTP_X_AUTHORIZATION'] ??
-                  $headers['X-Auth-Token'] ?? 
-                  $_SERVER['HTTP_X_AUTH_TOKEN'] ??
+                  $headers['authorization'] ??
                   null;
     
-    // Fallback: check if token is in request body (for testing purposes)
-    if (!$authHeader) {
-        $input = file_get_contents('php://input');
-        $jsonData = json_decode($input, true);
-        if ($jsonData && isset($jsonData['_token'])) {
-            $authHeader = 'Bearer ' . $jsonData['_token'];
-        }
-    }
-    
-    if (!$authHeader || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
-        // Debug logging - can be removed in production
-        error_log("Auth failed - Headers received: " . json_encode($headers));
-        error_log("Auth failed - HTTP_AUTHORIZATION: " . ($_SERVER['HTTP_AUTHORIZATION'] ?? 'not set'));
-        error_log("Auth failed - authHeader value: " . ($authHeader ?? 'null'));
-        
+    if (!$authHeader || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {    
         http_response_code(401);
         echo json_encode(['error' => 'Authorization token required']);
         exit;
@@ -198,62 +179,6 @@ function getCurrentUser() {
     return $user;
 }
 
-// Handle GET requests or CLI calls
-// if ($_SERVER['REQUEST_METHOD'] === 'GET' || php_sapi_name() === "cli") {
-//     $action = $_GET['action'] ?? null;
-
-//     if ($action) {
-//         switch ($action) {
-//             case 'getLogs':
-//                 header('Content-Type: application/json');
-//                 echo getAllLogs();
-//                 break;
-
-//             case 'getLogsByPunchingCode':
-//                 $punchingcode = filter_input(INPUT_GET, 'punchingcode', FILTER_SANITIZE_STRING);
-//                 if ($punchingcode) {
-//                     header('Content-Type: application/json');
-//                     echo getLogsByPunchingCode($punchingcode);
-//                 } else {
-//                     http_response_code(400);
-//                     echo json_encode(['error' => 'Missing or invalid punchingcode parameter']);
-//                 }
-//                 break;
-
-//             case 'exportLogs':
-//                 exportLogsToExcel();
-//                 break;
-
-//             default:
-//                 // Invalid action provided
-//                 http_response_code(400);
-//                 echo json_encode([
-//                     'error' => 'Invalid action',
-//                     'available_actions' => [
-//                         'getLogs',
-//                         'getLogsByPunchingCode',
-//                         'exportLogs'
-//                     ]
-//                 ]);
-//                 break;
-//         }
-//     } else {
-//         // No action provided, show default response
-//         http_response_code(200);
-//         echo json_encode([
-//             'message' => 'Welcome to the API',
-//             'instructions' => [
-//                 'getLogs' => '/ws.php?action=getLogs',
-//                 'getLogsByPunchingCode' => '/ws.php?action=getLogsByPunchingCode&punchingcode={value}',
-//                 'exportLogs' => '/ws.php?action=exportLogs'
-//             ]
-//         ]);
-//     }
-// } else {
-//     // Unsupported request method
-//     http_response_code(405);
-//     echo json_encode(['error' => 'Method not allowed']);
-// }
 
 // Set JSON response header
 header('Content-Type: application/json');
@@ -279,10 +204,8 @@ if (in_array($requestMethod, ['POST', 'PUT', 'PATCH'])) {
 // RESTful routing
 switch ($requestMethod) {
     
-    // === AUTHENTICATION & RESOURCES ===
     case 'GET':
         if (preg_match('/\/api\/auth\/me$/', $path)) {
-            // GET /api/auth/me - Get current user info
             $user = getCurrentUser();
             echo json_encode([
                 'status' => 'success',
@@ -295,69 +218,55 @@ switch ($requestMethod) {
                 ]
             ]);
             
-    // === ORGANIZATIONS RESOURCE ===
         } elseif (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
-            // GET /api/organizations/{id} - Get specific organization
             $organizationId = (int)$matches[1];
             echo json_encode(getOrganization($organizationId));
             
         } elseif (preg_match('/\/api\/organizations$/', $path)) {
-            // GET /api/organizations - Get all organizations
             echo json_encode(getAllOrganizations());
             
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/users$/', $path, $matches)) {
-            // GET /api/organizations/{id}/users - Get users by organization
             $organizationId = (int)$matches[1];
             echo json_encode(getUsersByOrganization($organizationId));
             
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/devices$/', $path, $matches)) {
-            // GET /api/organizations/{id}/devices - Get devices by organization
             $organizationId = (int)$matches[1];
             echo json_encode(getDevicesByOrganization($organizationId));
             
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/logs$/', $path, $matches)) {
-            // GET /api/organizations/{id}/logs - Get logs by organization
             $organizationId = (int)$matches[1];
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
             echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo));
             
-        // === USERS RESOURCE ===
+       
         } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
-            // GET /api/users/{punching_code} - Get user by punching code
             $punchingCode = $matches[1];
             $organizationId = $queryParams['organization_id'] ?? null;
             echo getLogsByPunchingCode($punchingCode, $organizationId);
             
-        // === DEVICES RESOURCE ===
+       
         } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
-            // GET /api/devices/{serial_number} - Get device details
             $serialNumber = $matches[1];
             echo json_encode(getDeviceDetails($serialNumber));
             
-        // === LOGS RESOURCE ===
+
         } elseif (preg_match('/\/api\/logs$/', $path)) {
-            // GET /api/logs - Get all logs from all organizations
             echo getAllLogs();
             
         } elseif (preg_match('/\/api\/logs\/export$/', $path)) {
-            // GET /api/logs/export - Export logs to Excel
-            exportLogsToExcel();
+             exportLogsToExcel();
             
         } elseif (preg_match('/\/api\/logs\/device\/([^\/]+)$/', $path, $matches)) {
-            // GET /api/logs/device/{device_serial} - Get logs by device
             requireAuth();
             $deviceSerial = $matches[1];
             echo json_encode(getLogsByDevice($deviceSerial));
             
         } elseif (preg_match('/\/api\/admins$/', $path)) {
-            // GET /api/admins - List all admins (super admin only)
             requireSuperAdmin();
             echo json_encode(getAllAdmins());
             
-        // === API ROOT ===
         } elseif (preg_match('/\/api\/?$/', $path) || $path === '/ws.php') {
-            // GET /api - API documentation
             echo json_encode([
                 'message' => 'IoT Organization RESTful API',
                 'version' => '1.0',
@@ -402,7 +311,6 @@ switch ($requestMethod) {
         
     case 'POST':
         if (preg_match('/\/api\/auth\/login$/', $path)) {
-            // POST /api/auth/login - Login
             if (!$jsonInput || empty($jsonInput['email']) || empty($jsonInput['password'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Email and password are required']);
@@ -412,14 +320,12 @@ switch ($requestMethod) {
             echo json_encode(loginAdmin($jsonInput['email'], $jsonInput['password']));
             
         } elseif (preg_match('/\/api\/auth\/logout$/', $path)) {
-            // POST /api/auth/logout - Logout (token-based, so just return success)
             echo json_encode([
                 'status' => 'success',
                 'message' => 'Logged out successfully'
             ]);
             
         } elseif (preg_match('/\/api\/organizations$/', $path)) {
-            // POST /api/organizations - Create organization
             if (!$jsonInput || empty($jsonInput['name']) || empty($jsonInput['contact_person']) || 
                 empty($jsonInput['email']) || empty($jsonInput['phone'])) {
                 http_response_code(400);
@@ -437,7 +343,6 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/users$/', $path)) {
-            // POST /api/users - Create user
             if (!$jsonInput || empty($jsonInput['punching_code']) || empty($jsonInput['name']) || 
                 empty($jsonInput['phone']) || empty($jsonInput['email'])) {
                 http_response_code(400);
@@ -454,7 +359,6 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/users\/bulk$/', $path)) {
-            // POST /api/users/bulk - Bulk create users
             if (!$jsonInput || !isset($jsonInput['users'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Missing required field: users array']);
@@ -464,8 +368,7 @@ switch ($requestMethod) {
             echo json_encode(bulkCreateUsers($jsonInput['users'], $jsonInput['organization_id'] ?? null));
             
         } elseif (preg_match('/\/api\/devices$/', $path)) {
-            // POST /api/devices - Register device
-            requireAuth(); // Require authentication
+            requireAuth();
             if (!$jsonInput || empty($jsonInput['serial_number']) || empty($jsonInput['organization_id'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Missing required fields: serial_number, organization_id']);
@@ -481,7 +384,6 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/admins$/', $path)) {
-            // POST /api/admins - Create admin (super admin only)
             requireSuperAdmin();
             if (!$jsonInput || empty($jsonInput['username']) || empty($jsonInput['email']) || 
                 empty($jsonInput['password']) || empty($jsonInput['role'])) {
@@ -499,7 +401,6 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/setup\/default-admin$/', $path)) {
-            // POST /api/setup/default-admin - Create default super admin (no auth required)
             echo json_encode(createDefaultSuperAdmin());
             
         } else {
@@ -510,7 +411,6 @@ switch ($requestMethod) {
         
     case 'PUT':
         if (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
-            // PUT /api/organizations/{id} - Update organization
             $organizationId = (int)$matches[1];
             
             echo json_encode(updateOrganization(
@@ -524,17 +424,14 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/users\/([^\/]+)\/activate$/', $path, $matches)) {
-            // PUT /api/users/{punching_code}/activate - Activate user
             $punchingCode = $matches[1];
             echo json_encode(activateUser($punchingCode));
             
         } elseif (preg_match('/\/api\/users\/([^\/]+)\/deactivate$/', $path, $matches)) {
-            // PUT /api/users/{punching_code}/deactivate - Deactivate user
             $punchingCode = $matches[1];
             echo json_encode(deactivateUser($punchingCode));
             
         } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
-            // PUT /api/devices/{serial_number} - Update device status
             $serialNumber = $matches[1];
             
             if (!$jsonInput || empty($jsonInput['status'])) {
@@ -552,7 +449,6 @@ switch ($requestMethod) {
             echo json_encode(updateDeviceStatus($serialNumber, $jsonInput['status']));
             
         } elseif (preg_match('/\/api\/devices\/([^\/]+)\/organization$/', $path, $matches)) {
-            // PUT /api/devices/{serial_number}/organization - Assign device to organization
             requireAuth();
             $serialNumber = $matches[1];
             
@@ -565,7 +461,6 @@ switch ($requestMethod) {
             echo json_encode(assignDeviceToOrganization($serialNumber, $jsonInput['organization_id']));
             
         } elseif (preg_match('/\/api\/admins\/(\d+)\/password$/', $path, $matches)) {
-            // PUT /api/admins/{id}/password - Update admin password (super admin only)
             requireSuperAdmin();
             $adminId = (int)$matches[1];
             
@@ -600,9 +495,6 @@ $isApiRequest = isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI']
 if (!$isApiRequest) {
     set_time_limit(0);
     ob_implicit_flush();
-
-    //date_default_timezone_set('Asia/Calcutta');
-    //date_default_timezone_set('PRC');
 
     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
 if(socket_bind($socket, $SERVER_IP, $SERVER_PORT)==false)
