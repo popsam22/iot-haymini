@@ -127,6 +127,8 @@ function requireAuth() {
     $authHeader = $headers['Authorization'] ?? 
                   $headers['authorization'] ?? 
                   $_SERVER['HTTP_AUTHORIZATION'] ?? 
+                  $headers['X-Authorization'] ?? 
+                  $_SERVER['HTTP_X_AUTHORIZATION'] ??
                   null;
     
     if (!$authHeader || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
