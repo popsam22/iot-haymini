@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS user_device_assignments (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
     device_id INT NOT NULL,
-    assigned_by INT NOT NULL COMMENT 'Admin ID who made the assignment',
+    assigned_by INT NULL COMMENT 'Admin ID who made the assignment',
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status ENUM('active', 'inactive') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
