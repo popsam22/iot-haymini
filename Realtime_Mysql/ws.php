@@ -142,7 +142,28 @@ function requireAuth() {
         echo json_encode(['error' => 'Invalid or expired token']);
         exit;
     }
-    
+
+    // Check organization status for non-super-admin users
+    if ($payload['role'] !== 'super-admin' && !empty($payload['organization_id'])) {
+        try {
+            $pdoConn = getValidConnection();
+            $stmt = $pdoConn->prepare("SELECT status FROM organizations WHERE id = ?");
+            $stmt->execute([$payload['organization_id']]);
+            $orgStatus = $stmt->fetchColumn();
+
+            if ($orgStatus !== 'active') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Organization access has been deactivated']);
+                exit;
+            }
+        } catch (PDOException $e) {
+            error_log("Database error checking organization status: " . $e->getMessage());
+            http_response_code(500);
+            echo json_encode(['error' => 'Internal server error']);
+            exit;
+        }
+    }
+
     return $payload;
 }
 
@@ -265,7 +286,52 @@ switch ($requestMethod) {
         } elseif (preg_match('/\/api\/admins$/', $path)) {
             requireSuperAdmin();
             echo json_encode(getAllAdmins());
-            
+
+        } elseif (preg_match('/\/api\/users\/(\d+)\/devices$/', $path, $matches)) {
+            requireAuth();
+            $userId = (int)$matches[1];
+            echo json_encode(getUserAssignedDevices($userId));
+
+        } elseif (preg_match('/\/api\/devices\/(\d+)\/users$/', $path, $matches)) {
+            requireAuth();
+            $deviceId = (int)$matches[1];
+            echo json_encode(getDeviceAssignedUsers($deviceId));
+
+        } elseif (preg_match('/\/api\/users\/csv-template$/', $path)) {
+            requireAuth();
+            generateUserCSVTemplate();
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/punch-settings$/', $path, $matches)) {
+            requireAuth();
+            $organizationId = (int)$matches[1];
+            echo json_encode(getOrganizationPunchSettings($organizationId));
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/attendance$/', $path, $matches)) {
+            requireAuth();
+            $organizationId = (int)$matches[1];
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            echo json_encode(getOrganizationAttendance($organizationId, $dateFrom, $dateTo));
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/attendance\/today$/', $path, $matches)) {
+            requireAuth();
+            $organizationId = (int)$matches[1];
+            echo json_encode(getTodayAttendanceStatus($organizationId));
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/absence-report$/', $path, $matches)) {
+            requireAuth();
+            $organizationId = (int)$matches[1];
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            echo json_encode(getAbsenceReport($organizationId, $dateFrom, $dateTo));
+
+        } elseif (preg_match('/\/api\/users\/(\d+)\/attendance-report$/', $path, $matches)) {
+            requireAuth();
+            $userId = (int)$matches[1];
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            echo json_encode(getUserAttendanceReport($userId, $dateFrom, $dateTo));
+
         } elseif (preg_match('/\/api\/?$/', $path) || $path === '/ws.php') {
             echo json_encode([
                 'message' => 'IoT Organization RESTful API',
@@ -278,12 +344,21 @@ switch ($requestMethod) {
                         'PUT /api/organizations/{id}' => 'Update organization',
                         'GET /api/organizations/{id}/users' => 'Get organization users',
                         'GET /api/organizations/{id}/devices' => 'Get organization devices',
-                        'GET /api/organizations/{id}/logs' => 'Get organization logs'
+                        'GET /api/organizations/{id}/logs' => 'Get organization logs',
+                        'GET /api/organizations/{id}/punch-settings' => 'Get punch time settings',
+                        'PUT /api/organizations/{id}/punch-settings' => 'Update punch time settings',
+                        'GET /api/organizations/{id}/attendance' => 'Get attendance report',
+                        'GET /api/organizations/{id}/attendance/today' => 'Get today\'s attendance status',
+                        'GET /api/organizations/{id}/absence-report' => 'Get absence report',
+                        'POST /api/organizations/{id}/generate-absence-records' => 'Generate absence records for date'
                     ],
                     'users' => [
                         'POST /api/users' => 'Create user',
                         'POST /api/users/bulk' => 'Bulk create users',
+                        'POST /api/users/upload-csv' => 'Upload users from CSV file',
+                        'GET /api/users/csv-template' => 'Download CSV template for bulk upload',
                         'GET /api/users/{punching_code}' => 'Get user logs',
+                        'GET /api/users/{user_id}/attendance-report' => 'Get user attendance report',
                         'PUT /api/users/{punching_code}/activate' => 'Activate user',
                         'PUT /api/users/{punching_code}/deactivate' => 'Deactivate user'
                     ],
@@ -299,6 +374,20 @@ switch ($requestMethod) {
                         'GET /api/logs/device/{device_serial}' => 'Get logs by device',
                         'GET /api/users/{punching_code}' => 'Get logs by user (punching code)',
                         'GET /api/organizations/{id}/logs' => 'Get logs by organization'
+                    ],
+                    'admins' => [
+                        'GET /api/admins' => 'Get all administrators (Super Admin only)',
+                        'POST /api/admins' => 'Create new administrator (Super Admin only)',
+                        'POST /api/admins/{id}/impersonate' => 'Impersonate admin (Super Admin only)',
+                        'POST /api/admins/exit-impersonation' => 'Exit admin impersonation session',
+                        'PUT /api/admins/{id}/password' => 'Update admin password (Super Admin only)'
+                    ],
+                    'assignments' => [
+                        'GET /api/users/{user_id}/devices' => 'Get devices assigned to user',
+                        'GET /api/devices/{device_id}/users' => 'Get users assigned to device',
+                        'POST /api/users/{user_id}/devices/{device_id}/assign' => 'Assign user to device',
+                        'POST /api/devices/{device_id}/users/bulk-assign' => 'Bulk assign users to device',
+                        'DELETE /api/users/{user_id}/devices/{device_id}/assign' => 'Remove user from device'
                     ]
                 ]
             ]);
@@ -399,7 +488,71 @@ switch ($requestMethod) {
                 $jsonInput['role'],
                 $jsonInput['organization_id'] ?? null
             ));
-            
+
+        } elseif (preg_match('/\/api\/admins\/(\d+)\/impersonate$/', $path, $matches)) {
+            requireSuperAdmin();
+            $targetAdminId = (int)$matches[1];
+            echo json_encode(impersonateAdmin($targetAdminId));
+
+        } elseif (preg_match('/\/api\/admins\/exit-impersonation$/', $path)) {
+            requireAuth(); // Any authenticated user can call this
+            echo json_encode(exitImpersonation());
+
+        } elseif (preg_match('/\/api\/users\/(\d+)\/devices\/(\d+)\/assign$/', $path, $matches)) {
+            requireAuth();
+            $user = requireAuth();
+            $userId = (int)$matches[1];
+            $deviceId = (int)$matches[2];
+            echo json_encode(assignUserToDevice($userId, $deviceId, $user['admin_id']));
+
+        } elseif (preg_match('/\/api\/devices\/(\d+)\/users\/bulk-assign$/', $path, $matches)) {
+            requireAuth();
+            $user = requireAuth();
+            $deviceId = (int)$matches[1];
+
+            if (!$jsonInput || !isset($jsonInput['user_ids']) || !is_array($jsonInput['user_ids'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required field: user_ids array']);
+                break;
+            }
+
+            echo json_encode(bulkAssignUsersToDevice($deviceId, $jsonInput['user_ids'], $user['admin_id']));
+
+        } elseif (preg_match('/\/api\/users\/upload-csv$/', $path)) {
+            requireAuth();
+
+            if (!isset($_FILES['csv_file'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'CSV file is required']);
+                break;
+            }
+
+            $csvFile = $_FILES['csv_file'];
+
+            // Validate file type
+            $allowedTypes = ['text/csv', 'application/csv', 'text/plain'];
+            if (!in_array($csvFile['type'], $allowedTypes)) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Invalid file type. Only CSV files are allowed.']);
+                break;
+            }
+
+            // Validate file size (10MB max)
+            if ($csvFile['size'] > 10 * 1024 * 1024) {
+                http_response_code(400);
+                echo json_encode(['error' => 'File too large. Maximum size is 10MB.']);
+                break;
+            }
+
+            $defaultOrganizationId = $jsonInput['organization_id'] ?? null;
+            echo json_encode(uploadUsersFromCSV($csvFile, $defaultOrganizationId));
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/generate-absence-records$/', $path, $matches)) {
+            requireAuth();
+            $organizationId = (int)$matches[1];
+            $date = $jsonInput['date'] ?? null;
+            echo json_encode(generateAbsenceRecords($organizationId, $date));
+
         } elseif (preg_match('/\/api\/setup\/default-admin$/', $path)) {
             echo json_encode(createDefaultSuperAdmin());
             
@@ -420,7 +573,8 @@ switch ($requestMethod) {
                 $jsonInput['contact_person'] ?? null,
                 $jsonInput['email'] ?? null,
                 $jsonInput['phone'] ?? null,
-                $jsonInput['description'] ?? null
+                $jsonInput['description'] ?? null,
+                $jsonInput['status'] ?? null
             ));
             
         } elseif (preg_match('/\/api\/users\/([^\/]+)\/activate$/', $path, $matches)) {
@@ -471,18 +625,45 @@ switch ($requestMethod) {
             }
             
             echo json_encode(updateAdminPassword($adminId, $jsonInput['password']));
-            
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/punch-settings$/', $path, $matches)) {
+            requireAuth();
+            $user = requireAuth();
+            $organizationId = (int)$matches[1];
+
+            if (!$jsonInput) {
+                http_response_code(400);
+                echo json_encode(['error' => 'JSON body required']);
+                break;
+            }
+
+            echo json_encode(updatePunchSettings($organizationId, $jsonInput, $user['admin_id']));
+
         } else {
             http_response_code(404);
             echo json_encode(['error' => 'Endpoint not found']);
         }
         break;
-        
+
+    case 'DELETE':
+        if (preg_match('/\/api\/users\/(\d+)\/devices\/(\d+)\/assign$/', $path, $matches)) {
+            requireAuth();
+            $user = requireAuth();
+            $userId = (int)$matches[1];
+            $deviceId = (int)$matches[2];
+            echo json_encode(removeUserFromDevice($userId, $deviceId, $user['admin_id']));
+
+        } else {
+            http_response_code(404);
+            echo json_encode(['error' => 'Endpoint not found']);
+        }
+        break;
+
     default:
         http_response_code(405);
         echo json_encode([
             'error' => 'Method not allowed',
-            'allowed_methods' => ['GET', 'POST', 'PUT']
+            'allowed_methods' => ['GET', 'POST', 'PUT', 'DELETE']
         ]);
         break;
 }
@@ -1203,7 +1384,12 @@ function store($records, $deviceSerial, $sts = 0) {
 
         // Step 2: Validate user belongs to same organization as device
         try {
-            $stmt = $pdoConn->prepare("SELECT id, name, email, phone_number, organization_id, status FROM users WHERE punching_code = ?");
+            $stmt = $pdoConn->prepare("
+                SELECT u.id, u.name, u.email, u.phone_number, u.organization_id, u.status, o.status as organization_status
+                FROM users u
+                LEFT JOIN organizations o ON u.organization_id = o.id
+                WHERE u.punching_code = ?
+            ");
             $stmt->execute([$record["enrollid"]]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
             
@@ -1224,9 +1410,41 @@ function store($records, $deviceSerial, $sts = 0) {
                 $unauthorizedAccess++;
                 continue;
             }
-            
+
+            // Check if organization is active for notifications
+            if ($user['organization_status'] !== 'active') {
+                error_log("Organization inactive, skipping notifications for org: {$user['organization_id']}, User: {$record['enrollid']}");
+                // Continue processing the record but skip notifications
+            }
+
         } catch (PDOException $e) {
             error_log("Database error during user validation: " . $e->getMessage());
+            $invalidRecords++;
+            continue;
+        }
+
+        // Step 2.5: Check if user is assigned to this device
+        try {
+            // Get device ID for assignment check
+            $stmt = $pdoConn->prepare("SELECT id FROM devices WHERE serial_number = ?");
+            $stmt->execute([$deviceSerial]);
+            $deviceId = $stmt->fetchColumn();
+
+            if (!$deviceId) {
+                error_log("Device not found in database: " . $deviceSerial);
+                $invalidRecords++;
+                continue;
+            }
+
+            // Check if user is assigned to this device
+            if (!isUserAssignedToDevice($user['id'], $deviceId)) {
+                error_log("User not assigned to device - User: {$record['enrollid']} ({$user['name']}), Device: $deviceSerial");
+                $unauthorizedAccess++;
+                continue;
+            }
+
+        } catch (PDOException $e) {
+            error_log("Database error during device assignment check: " . $e->getMessage());
             $invalidRecords++;
             continue;
         }
@@ -1253,20 +1471,36 @@ function store($records, $deviceSerial, $sts = 0) {
             continue;
         }
 
-        // Step 4: Add to insertion array with organization context
-        $sqlArray[] = sprintf(
-            '(%s, %s, %s, %s, %s, %s)',
-            $pdoConn->quote($record["enrollid"]),
-            $pdoConn->quote(date("Y-m-d", strtotime($record["time"]))),
-            $pdoConn->quote(date("H:i:s", strtotime($record["time"]))),
-            $pdoConn->quote($deviceSerial),
-            $pdoConn->quote($deviceSerial),
-            $pdoConn->quote($organizationId)
+        // Step 4: Log enhanced attendance punch
+        $punchResult = logAttendancePunch(
+            $user['id'],
+            $record["enrollid"],
+            $organizationId,
+            $deviceSerial,
+            $record["time"]
         );
 
-        // Step 5: Send notifications to organization users only
+        if ($punchResult['status'] === 'success') {
+            // Also add to legacy format for backward compatibility
+            $sqlArray[] = sprintf(
+                '(%s, %s, %s, %s, %s, %s)',
+                $pdoConn->quote($record["enrollid"]),
+                $pdoConn->quote(date("Y-m-d", strtotime($record["time"]))),
+                $pdoConn->quote(date("H:i:s", strtotime($record["time"]))),
+                $pdoConn->quote($deviceSerial),
+                $pdoConn->quote($deviceSerial),
+                $pdoConn->quote($organizationId)
+            );
+
+            // Log punch details
+            error_log("Enhanced punch logged - User: {$record['enrollid']}, Type: {$punchResult['punch_type']}, Late: " . ($punchResult['is_late'] ? 'Yes' : 'No') . ", Early: " . ($punchResult['is_early'] ? 'Yes' : 'No'));
+        } else {
+            error_log("Failed to log enhanced attendance for user: {$record['enrollid']}");
+        }
+
+        // Step 5: Send notifications to organization users only (if organization is active)
         try {
-            if ($user && !empty($user['email'])) {
+            if ($user && !empty($user['email']) && $user['organization_status'] === 'active') {
                 $userName = !empty($user['name']) ? $user['name'] : 'Unknown User';
                 $punchTime = date("Y-m-d H:i:s", strtotime($record["time"]));
                 
@@ -1302,6 +1536,8 @@ function store($records, $deviceSerial, $sts = 0) {
                         error_log("Failed to send SMS to: " . $user['phone_number']);
                     }
                 }
+            } elseif ($user && $user['organization_status'] !== 'active') {
+                error_log("Skipping notifications for inactive organization: " . $user['organization_id'] . ", User: " . $record["enrollid"]);
             }
         } catch (Exception $e) {
             error_log("Error during notification process: " . $e->getMessage());
@@ -2170,7 +2406,7 @@ function getAllOrganizations() {
     }
 }
 
-function updateOrganization($organization_id, $name = null, $address = null, $contact_person = null, $email = null, $phone = null, $description = null) {
+function updateOrganization($organization_id, $name = null, $address = null, $contact_person = null, $email = null, $phone = null, $description = null, $status = null) {
     $pdoConn = getValidConnection();
     
     try {
@@ -2228,7 +2464,19 @@ function updateOrganization($organization_id, $name = null, $address = null, $co
             $updates[] = "description = ?";
             $params[] = $description;
         }
-        
+
+        if ($status !== null) {
+            // Validate status
+            if (!in_array($status, ['active', 'inactive'])) {
+                return [
+                    "status" => "error",
+                    "message" => "Invalid status. Must be: active or inactive"
+                ];
+            }
+            $updates[] = "status = ?";
+            $params[] = $status;
+        }
+
         if (empty($updates)) {
             return [
                 "status" => "success",
@@ -2337,22 +2585,30 @@ function getLogsByDevice($device_serial) {
 
 function loginAdmin($email, $password) {
     $pdoConn = getValidConnection();
-    
+
     try {
-        // Get admin by email
+        // Get admin by email and check organization status
         $stmt = $pdoConn->prepare("
-            SELECT a.*, o.name as organization_name 
+            SELECT a.*, o.name as organization_name, o.status as organization_status
             FROM admins a
             LEFT JOIN organizations o ON a.organization_id = o.id
             WHERE a.email = ? AND a.status = 'active'
         ");
         $stmt->execute([$email]);
         $admin = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$admin || !password_verify($password, $admin['password_hash'])) {
             return [
                 'status' => 'error',
                 'message' => 'Invalid email or password'
+            ];
+        }
+
+        // Check if organization is active (for non-super-admin users)
+        if ($admin['role'] !== 'super-admin' && $admin['organization_status'] !== 'active') {
+            return [
+                'status' => 'error',
+                'message' => 'Organization access has been deactivated. Please contact support.'
             ];
         }
         
@@ -2382,6 +2638,116 @@ function loginAdmin($email, $password) {
             'message' => 'Login failed due to server error'
         ];
     }
+}
+
+function generateAdminWelcomeEmail($username, $email, $password, $role, $organizationName = null) {
+    $systemName = "Haymini IoT Management System";
+    $loginUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") .
+                "://{$_SERVER['HTTP_HOST']}" . dirname($_SERVER['REQUEST_URI']) . "/";
+
+    $organizationInfo = $organizationName ? "<tr><td style='padding: 8px 0; color: #333; font-weight: bold;'>Organization:</td><td style='padding: 8px 0; color: #666;'>{$organizationName}</td></tr>" : "";
+    $roleDisplay = $role === 'super-admin' ? 'Super Administrator' : 'Administrator';
+
+    $emailTemplate = "
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Welcome to {$systemName}</title>
+</head>
+<body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px; background-color: #f4f4f4;'>
+    <div style='max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.1); overflow: hidden;'>
+
+        <!-- Header -->
+        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 20px; text-align: center;'>
+            <h1 style='margin: 0; font-size: 28px; font-weight: 300;'>Welcome to {$systemName}</h1>
+            <p style='margin: 10px 0 0; opacity: 0.9; font-size: 16px;'>Your Administrator Account is Ready</p>
+        </div>
+
+        <!-- Content -->
+        <div style='padding: 30px 20px;'>
+            <h2 style='color: #667eea; margin-bottom: 20px; font-size: 22px;'>Dear {$username},</h2>
+
+            <p style='font-size: 16px; margin-bottom: 25px; color: #555;'>
+                Your administrator account has been successfully created by a Super Administrator.
+                Welcome to the team!
+            </p>
+
+            <!-- Account Details Box -->
+            <div style='background-color: #f8f9ff; border-left: 4px solid #667eea; padding: 20px; margin: 25px 0; border-radius: 0 5px 5px 0;'>
+                <h3 style='margin: 0 0 15px; color: #667eea; font-size: 18px;'>Account Details</h3>
+                <table style='width: 100%; border-collapse: collapse;'>
+                    <tr>
+                        <td style='padding: 8px 0; color: #333; font-weight: bold;'>Username:</td>
+                        <td style='padding: 8px 0; color: #666;'>{$username}</td>
+                    </tr>
+                    <tr>
+                        <td style='padding: 8px 0; color: #333; font-weight: bold;'>Email:</td>
+                        <td style='padding: 8px 0; color: #666;'>{$email}</td>
+                    </tr>
+                    <tr>
+                        <td style='padding: 8px 0; color: #333; font-weight: bold;'>Role:</td>
+                        <td style='padding: 8px 0; color: #666;'>{$roleDisplay}</td>
+                    </tr>
+                    {$organizationInfo}
+                </table>
+            </div>
+
+            <!-- Login Credentials Box -->
+            <div style='background-color: #fff5f5; border-left: 4px solid #e53e3e; padding: 20px; margin: 25px 0; border-radius: 0 5px 5px 0;'>
+                <h3 style='margin: 0 0 15px; color: #e53e3e; font-size: 18px;'>🔐 Login Credentials</h3>
+                <table style='width: 100%; border-collapse: collapse;'>
+                    <tr>
+                        <td style='padding: 8px 0; color: #333; font-weight: bold;'>Email:</td>
+                        <td style='padding: 8px 0; color: #666; font-family: monospace; background: #f0f0f0; padding: 5px 8px; border-radius: 3px;'>{$email}</td>
+                    </tr>
+                    <tr>
+                        <td style='padding: 8px 0; color: #333; font-weight: bold;'>Password:</td>
+                        <td style='padding: 8px 0; color: #666; font-family: monospace; background: #f0f0f0; padding: 5px 8px; border-radius: 3px;'>{$password}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Login Button -->
+            <div style='text-align: center; margin: 30px 0;'>
+                <a href='{$loginUrl}' style='display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);'>
+                    Access Your Dashboard
+                </a>
+            </div>
+
+            <!-- Security Notes -->
+            <div style='background-color: #fffbf0; border-left: 4px solid #f6ad55; padding: 20px; margin: 25px 0; border-radius: 0 5px 5px 0;'>
+                <h3 style='margin: 0 0 15px; color: #c05621; font-size: 18px;'>🛡️ Important Security Notes</h3>
+                <ul style='margin: 0; padding-left: 20px; color: #744210;'>
+                    <li style='margin-bottom: 8px;'>Please change your password immediately after your first login</li>
+                    <li style='margin-bottom: 8px;'>Keep your login credentials secure and do not share them</li>
+                    <li style='margin-bottom: 8px;'>Contact your system administrator if you have any questions</li>
+                </ul>
+            </div>
+
+            <p style='font-size: 16px; margin-top: 25px; color: #555;'>
+                Thank you for joining our team! We're excited to have you aboard.
+            </p>
+
+            <p style='margin-top: 30px; color: #667eea; font-weight: bold;'>
+                Best regards,<br>
+                {$systemName} Team
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <div style='background-color: #f8f9ff; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0;'>
+            <p style='margin: 0; color: #a0aec0; font-size: 14px;'>
+                This is an automated message. Please do not reply to this email.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+    ";
+
+    return trim($emailTemplate);
 }
 
 function createAdmin($username, $email, $password, $role, $organizationId = null) {
@@ -2433,13 +2799,39 @@ function createAdmin($username, $email, $password, $role, $organizationId = null
         
         $stmt->execute([$username, $email, $passwordHash, $role, $organizationId]);
         $adminId = $pdoConn->lastInsertId();
-        
+
         error_log("Created new admin: $email (Role: $role, ID: $adminId)");
-        
+
+        // Get organization name if organization_id is provided
+        $organizationName = null;
+        if ($organizationId) {
+            $orgStmt = $pdoConn->prepare("SELECT name FROM organizations WHERE id = ?");
+            $orgStmt->execute([$organizationId]);
+            $organizationName = $orgStmt->fetchColumn();
+        }
+
+        // Send welcome email with login credentials
+        try {
+            $emailSubject = "Welcome to Haymini IoT - Your Admin Account Created";
+            $emailMessage = generateAdminWelcomeEmail($username, $email, $password, $role, $organizationName);
+
+            if (sendEmail($email, $emailMessage, $emailSubject)) {
+                error_log("Welcome email sent successfully to: $email");
+                $emailStatus = "Welcome email sent successfully";
+            } else {
+                error_log("Failed to send welcome email to: $email");
+                $emailStatus = "Admin created but email notification failed";
+            }
+        } catch (Exception $e) {
+            error_log("Error sending welcome email to $email: " . $e->getMessage());
+            $emailStatus = "Admin created but email notification failed";
+        }
+
         return [
             'status' => 'success',
             'message' => 'Admin created successfully',
-            'admin_id' => $adminId
+            'admin_id' => $adminId,
+            'email_status' => $emailStatus
         ];
         
     } catch (PDOException $e) {
@@ -2479,6 +2871,81 @@ function getAllAdmins() {
             'message' => 'Failed to retrieve admins'
         ];
     }
+}
+
+function impersonateAdmin($targetAdminId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Verify the target admin exists and is active
+        $stmt = $pdoConn->prepare("
+            SELECT a.id, a.username, a.email, a.role, a.organization_id, a.status,
+                   o.name as organization_name, o.status as organization_status
+            FROM admins a
+            LEFT JOIN organizations o ON a.organization_id = o.id
+            WHERE a.id = ? AND a.status = 'active'
+        ");
+        $stmt->execute([$targetAdminId]);
+        $targetAdmin = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$targetAdmin) {
+            return [
+                'status' => 'error',
+                'message' => 'Target admin not found or inactive'
+            ];
+        }
+
+        // Prevent impersonating another super admin
+        if ($targetAdmin['role'] === 'super_admin') {
+            return [
+                'status' => 'error',
+                'message' => 'Cannot impersonate another super admin'
+            ];
+        }
+
+        // Check if target admin's organization is active (if applicable)
+        if ($targetAdmin['organization_id'] && $targetAdmin['organization_status'] !== 'active') {
+            return [
+                'status' => 'error',
+                'message' => 'Cannot impersonate admin from inactive organization'
+            ];
+        }
+
+        // Generate JWT token for impersonation
+        $impersonationToken = generateJWT($targetAdmin);
+
+        error_log("Super admin impersonation: Target admin {$targetAdmin['email']} (ID: {$targetAdminId})");
+
+        return [
+            'status' => 'success',
+            'message' => 'Admin impersonation successful',
+            'token' => $impersonationToken,
+            'admin' => [
+                'id' => $targetAdmin['id'],
+                'username' => $targetAdmin['username'],
+                'email' => $targetAdmin['email'],
+                'role' => $targetAdmin['role'],
+                'organization_id' => $targetAdmin['organization_id'],
+                'organization_name' => $targetAdmin['organization_name']
+            ]
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in impersonateAdmin: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to impersonate admin due to server error'
+        ];
+    }
+}
+
+function exitImpersonation() {
+    // This endpoint allows returning to super admin session
+    // The frontend should store the original super admin token before impersonation
+    return [
+        'status' => 'success',
+        'message' => 'Impersonation session ended. Please use your original super admin token.'
+    ];
 }
 
 function updateAdminPassword($adminId, $newPassword) {
@@ -2567,6 +3034,1142 @@ function createDefaultSuperAdmin() {
         return [
             'status' => 'error',
             'message' => 'Failed to create default super admin'
+        ];
+    }
+}
+
+// ===============================
+// USER-DEVICE ASSIGNMENT FUNCTIONS
+// ===============================
+
+function assignUserToDevice($userId, $deviceId, $assignedBy) {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Validate user exists and get organization
+        $stmt = $pdoConn->prepare("SELECT id, organization_id, punching_code, name FROM users WHERE id = ? AND status = 'active'");
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            return [
+                'status' => 'error',
+                'message' => 'User not found or inactive'
+            ];
+        }
+
+        // Validate device exists and get organization
+        $stmt = $pdoConn->prepare("SELECT id, serial_number, device_name, organization_id FROM devices WHERE id = ? AND status = 'active'");
+        $stmt->execute([$deviceId]);
+        $device = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$device) {
+            return [
+                'status' => 'error',
+                'message' => 'Device not found or inactive'
+            ];
+        }
+
+        // Ensure user and device belong to same organization
+        if ($user['organization_id'] != $device['organization_id']) {
+            return [
+                'status' => 'error',
+                'message' => 'User and device must belong to the same organization'
+            ];
+        }
+
+        // Check if assignment already exists
+        $stmt = $pdoConn->prepare("SELECT id, status FROM user_device_assignments WHERE user_id = ? AND device_id = ?");
+        $stmt->execute([$userId, $deviceId]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($existing) {
+            if ($existing['status'] === 'active') {
+                return [
+                    'status' => 'exists',
+                    'message' => 'User is already assigned to this device'
+                ];
+            } else {
+                // Reactivate existing assignment
+                $stmt = $pdoConn->prepare("UPDATE user_device_assignments SET status = 'active', assigned_by = ?, assigned_at = NOW() WHERE id = ?");
+                $stmt->execute([$assignedBy, $existing['id']]);
+
+                error_log("Reactivated user-device assignment: User {$user['punching_code']} to Device {$device['serial_number']}");
+
+                return [
+                    'status' => 'success',
+                    'message' => 'User assignment reactivated successfully'
+                ];
+            }
+        }
+
+        // Create new assignment
+        $stmt = $pdoConn->prepare("
+            INSERT INTO user_device_assignments (user_id, device_id, assigned_by, status)
+            VALUES (?, ?, ?, 'active')
+        ");
+        $stmt->execute([$userId, $deviceId, $assignedBy]);
+
+        error_log("Created user-device assignment: User {$user['punching_code']} ({$user['name']}) to Device {$device['serial_number']} ({$device['device_name']})");
+
+        return [
+            'status' => 'success',
+            'message' => 'User assigned to device successfully',
+            'assignment_id' => $pdoConn->lastInsertId()
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in assignUserToDevice: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to assign user to device due to server error'
+        ];
+    }
+}
+
+function removeUserFromDevice($userId, $deviceId, $removedBy) {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Check if assignment exists and is active
+        $stmt = $pdoConn->prepare("SELECT id FROM user_device_assignments WHERE user_id = ? AND device_id = ? AND status = 'active'");
+        $stmt->execute([$userId, $deviceId]);
+        $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$assignment) {
+            return [
+                'status' => 'error',
+                'message' => 'Active assignment not found'
+            ];
+        }
+
+        // Deactivate assignment
+        $stmt = $pdoConn->prepare("UPDATE user_device_assignments SET status = 'inactive', assigned_by = ?, assigned_at = NOW() WHERE id = ?");
+        $stmt->execute([$removedBy, $assignment['id']]);
+
+        error_log("Removed user-device assignment: Assignment ID {$assignment['id']}");
+
+        return [
+            'status' => 'success',
+            'message' => 'User removed from device successfully'
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in removeUserFromDevice: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to remove user from device due to server error'
+        ];
+    }
+}
+
+function getUserAssignedDevices($userId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT d.id, d.serial_number, d.device_name, d.device_model, d.ip_address, d.status,
+                   uda.assigned_at, a.username as assigned_by_username
+            FROM user_device_assignments uda
+            INNER JOIN devices d ON uda.device_id = d.id
+            LEFT JOIN admins a ON uda.assigned_by = a.id
+            WHERE uda.user_id = ? AND uda.status = 'active'
+            ORDER BY uda.assigned_at DESC
+        ");
+        $stmt->execute([$userId]);
+        $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return [
+            'status' => 'success',
+            'message' => 'User assigned devices retrieved successfully',
+            'total_count' => count($devices),
+            'devices' => $devices
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getUserAssignedDevices: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve user assigned devices'
+        ];
+    }
+}
+
+function getDeviceAssignedUsers($deviceId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT u.id, u.punching_code, u.name, u.email, u.phone_number, u.status,
+                   uda.assigned_at, a.username as assigned_by_username
+            FROM user_device_assignments uda
+            INNER JOIN users u ON uda.user_id = u.id
+            LEFT JOIN admins a ON uda.assigned_by = a.id
+            WHERE uda.device_id = ? AND uda.status = 'active'
+            ORDER BY uda.assigned_at DESC
+        ");
+        $stmt->execute([$deviceId]);
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return [
+            'status' => 'success',
+            'message' => 'Device assigned users retrieved successfully',
+            'total_count' => count($users),
+            'users' => $users
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getDeviceAssignedUsers: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve device assigned users'
+        ];
+    }
+}
+
+function isUserAssignedToDevice($userId, $deviceId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT COUNT(*) FROM user_device_assignments
+            WHERE user_id = ? AND device_id = ? AND status = 'active'
+        ");
+        $stmt->execute([$userId, $deviceId]);
+        return $stmt->fetchColumn() > 0;
+
+    } catch (PDOException $e) {
+        error_log("Database error in isUserAssignedToDevice: " . $e->getMessage());
+        return false;
+    }
+}
+
+function bulkAssignUsersToDevice($deviceId, $userIds, $assignedBy) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $results = [
+            'assigned' => 0,
+            'reactivated' => 0,
+            'already_assigned' => 0,
+            'errors' => 0,
+            'details' => []
+        ];
+
+        foreach ($userIds as $userId) {
+            $result = assignUserToDevice($userId, $deviceId, $assignedBy);
+
+            if ($result['status'] === 'success') {
+                $results['assigned']++;
+            } elseif ($result['status'] === 'exists') {
+                $results['already_assigned']++;
+            } else {
+                $results['errors']++;
+            }
+
+            $results['details'][] = [
+                'user_id' => $userId,
+                'status' => $result['status'],
+                'message' => $result['message']
+            ];
+        }
+
+        return [
+            'status' => 'success',
+            'message' => 'Bulk assignment completed',
+            'results' => $results
+        ];
+
+    } catch (Exception $e) {
+        error_log("Error in bulkAssignUsersToDevice: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Bulk assignment failed: ' . $e->getMessage()
+        ];
+    }
+}
+
+// ===============================
+// CSV UPLOAD FUNCTIONS
+// ===============================
+
+function generateUserCSVTemplate() {
+    $headers = [
+        'punching_code',
+        'name',
+        'email',
+        'phone',
+        'organization_id'
+    ];
+
+    $sampleData = [
+        ['U001', 'John Doe', 'john.doe@example.com', '1234567890', '1'],
+        ['U002', 'Jane Smith', 'jane.smith@example.com', '0987654321', '1'],
+        ['U003', 'Bob Johnson', 'bob.johnson@example.com', '5555551234', '2']
+    ];
+
+    // Set headers for CSV download
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="users_template.csv"');
+    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+
+    $output = fopen('php://output', 'w');
+
+    // Write CSV headers
+    fputcsv($output, $headers);
+
+    // Write sample data
+    foreach ($sampleData as $row) {
+        fputcsv($output, $row);
+    }
+
+    fclose($output);
+    exit();
+}
+
+function parseCSVFile($filePath) {
+    $results = [
+        'valid_rows' => [],
+        'invalid_rows' => [],
+        'errors' => []
+    ];
+
+    if (!file_exists($filePath)) {
+        $results['errors'][] = 'CSV file not found';
+        return $results;
+    }
+
+    $handle = fopen($filePath, 'r');
+    if ($handle === false) {
+        $results['errors'][] = 'Unable to read CSV file';
+        return $results;
+    }
+
+    $headers = fgetcsv($handle);
+    if ($headers === false) {
+        $results['errors'][] = 'CSV file is empty or invalid';
+        fclose($handle);
+        return $results;
+    }
+
+    // Expected headers (order doesn't matter)
+    $expectedHeaders = ['punching_code', 'name', 'email', 'phone', 'organization_id'];
+    $headerMap = [];
+
+    // Map headers to their positions
+    foreach ($expectedHeaders as $expectedHeader) {
+        $position = array_search($expectedHeader, $headers);
+        if ($position !== false) {
+            $headerMap[$expectedHeader] = $position;
+        }
+    }
+
+    // Check for required headers
+    $requiredHeaders = ['punching_code', 'name', 'email', 'phone'];
+    $missingHeaders = [];
+    foreach ($requiredHeaders as $required) {
+        if (!isset($headerMap[$required])) {
+            $missingHeaders[] = $required;
+        }
+    }
+
+    if (!empty($missingHeaders)) {
+        $results['errors'][] = 'Missing required headers: ' . implode(', ', $missingHeaders);
+        fclose($handle);
+        return $results;
+    }
+
+    $rowNumber = 1; // Start from 1 (after headers)
+    while (($data = fgetcsv($handle)) !== false) {
+        $rowNumber++;
+
+        // Skip empty rows
+        if (empty(array_filter($data))) {
+            continue;
+        }
+
+        $rowData = [
+            'punching_code' => isset($headerMap['punching_code']) ? trim($data[$headerMap['punching_code']] ?? '') : '',
+            'name' => isset($headerMap['name']) ? trim($data[$headerMap['name']] ?? '') : '',
+            'email' => isset($headerMap['email']) ? trim($data[$headerMap['email']] ?? '') : '',
+            'phone' => isset($headerMap['phone']) ? trim($data[$headerMap['phone']] ?? '') : '',
+            'organization_id' => isset($headerMap['organization_id']) ? trim($data[$headerMap['organization_id']] ?? '') : null
+        ];
+
+        // Validate row data
+        $errors = [];
+
+        if (empty($rowData['punching_code'])) {
+            $errors[] = 'Punching code is required';
+        }
+
+        if (empty($rowData['name'])) {
+            $errors[] = 'Name is required';
+        }
+
+        if (empty($rowData['email']) || !filter_var($rowData['email'], FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Valid email is required';
+        }
+
+        if (empty($rowData['phone'])) {
+            $errors[] = 'Phone number is required';
+        }
+
+        // Validate organization_id if provided
+        if (!empty($rowData['organization_id']) && !is_numeric($rowData['organization_id'])) {
+            $errors[] = 'Organization ID must be numeric';
+        }
+
+        if (!empty($errors)) {
+            $results['invalid_rows'][] = [
+                'row_number' => $rowNumber,
+                'data' => $rowData,
+                'errors' => $errors
+            ];
+        } else {
+            $results['valid_rows'][] = $rowData;
+        }
+    }
+
+    fclose($handle);
+    return $results;
+}
+
+function uploadUsersFromCSV($csvFile, $defaultOrganizationId = null) {
+    try {
+        // Parse CSV file
+        $parseResults = parseCSVFile($csvFile['tmp_name']);
+
+        if (!empty($parseResults['errors'])) {
+            return [
+                'status' => 'error',
+                'message' => 'CSV parsing failed',
+                'errors' => $parseResults['errors']
+            ];
+        }
+
+        if (empty($parseResults['valid_rows'])) {
+            return [
+                'status' => 'error',
+                'message' => 'No valid user data found in CSV',
+                'invalid_rows' => $parseResults['invalid_rows']
+            ];
+        }
+
+        // Set organization_id for rows that don't have one
+        foreach ($parseResults['valid_rows'] as &$row) {
+            if (empty($row['organization_id'])) {
+                $row['organization_id'] = $defaultOrganizationId;
+            }
+        }
+
+        // Use existing bulk creation function
+        $bulkResults = bulkCreateUsers($parseResults['valid_rows'], $defaultOrganizationId);
+
+        // Combine results
+        $response = [
+            'status' => 'success',
+            'message' => 'CSV upload completed',
+            'csv_parsing' => [
+                'total_rows_processed' => count($parseResults['valid_rows']) + count($parseResults['invalid_rows']),
+                'valid_rows' => count($parseResults['valid_rows']),
+                'invalid_rows' => count($parseResults['invalid_rows']),
+                'parsing_errors' => $parseResults['errors']
+            ],
+            'user_creation' => $bulkResults['results'],
+            'invalid_rows_details' => $parseResults['invalid_rows']
+        ];
+
+        // Clean up uploaded file
+        if (file_exists($csvFile['tmp_name'])) {
+            unlink($csvFile['tmp_name']);
+        }
+
+        return $response;
+
+    } catch (Exception $e) {
+        error_log("Error in uploadUsersFromCSV: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'CSV upload failed: ' . $e->getMessage()
+        ];
+    }
+}
+
+// ===============================
+// PUNCH TIME SETTINGS FUNCTIONS
+// ===============================
+
+function getOrganizationPunchSettings($organizationId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT * FROM organization_punch_settings
+            WHERE organization_id = ?
+        ");
+        $stmt->execute([$organizationId]);
+        $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$settings) {
+            // Create default settings if none exist
+            $defaultSettings = createDefaultPunchSettings($organizationId);
+            return $defaultSettings;
+        }
+
+        return [
+            'status' => 'success',
+            'settings' => $settings
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getOrganizationPunchSettings: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve punch settings'
+        ];
+    }
+}
+
+function createDefaultPunchSettings($organizationId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            INSERT INTO organization_punch_settings
+            (organization_id, punch_in_start_time, punch_in_end_time, punch_out_start_time, punch_out_end_time)
+            VALUES (?, '07:00:00', '11:59:59', '12:00:00', '18:00:00')
+        ");
+        $stmt->execute([$organizationId]);
+
+        return [
+            'status' => 'success',
+            'message' => 'Default punch settings created',
+            'settings' => [
+                'id' => $pdoConn->lastInsertId(),
+                'organization_id' => $organizationId,
+                'punch_in_start_time' => '07:00:00',
+                'punch_in_end_time' => '11:59:59',
+                'punch_out_start_time' => '12:00:00',
+                'punch_out_end_time' => '18:00:00',
+                'grace_period_minutes' => 15,
+                'require_both_punches' => true
+            ]
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in createDefaultPunchSettings: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to create default punch settings'
+        ];
+    }
+}
+
+function updatePunchSettings($organizationId, $settings, $updatedBy) {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Validate time formats
+        $timeFields = ['punch_in_start_time', 'punch_in_end_time', 'punch_out_start_time', 'punch_out_end_time', 'auto_punch_out_time'];
+        foreach ($timeFields as $field) {
+            if (isset($settings[$field]) && !preg_match('/^([01]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $settings[$field])) {
+                return [
+                    'status' => 'error',
+                    'message' => "Invalid time format for {$field}. Use HH:MM:SS format."
+                ];
+            }
+        }
+
+        // Validate logical time ranges
+        if (isset($settings['punch_in_start_time']) && isset($settings['punch_in_end_time'])) {
+            if ($settings['punch_in_start_time'] >= $settings['punch_in_end_time']) {
+                return [
+                    'status' => 'error',
+                    'message' => 'Punch in start time must be before punch in end time'
+                ];
+            }
+        }
+
+        if (isset($settings['punch_out_start_time']) && isset($settings['punch_out_end_time'])) {
+            if ($settings['punch_out_start_time'] >= $settings['punch_out_end_time']) {
+                return [
+                    'status' => 'error',
+                    'message' => 'Punch out start time must be before punch out end time'
+                ];
+            }
+        }
+
+        // Build update query dynamically
+        $updates = [];
+        $params = [];
+
+        $allowedFields = [
+            'punch_in_start_time', 'punch_in_end_time', 'punch_out_start_time', 'punch_out_end_time',
+            'timezone', 'grace_period_minutes', 'require_both_punches', 'auto_punch_out_time'
+        ];
+
+        foreach ($allowedFields as $field) {
+            if (isset($settings[$field])) {
+                $updates[] = "{$field} = ?";
+                $params[] = $settings[$field];
+            }
+        }
+
+        if (empty($updates)) {
+            return [
+                'status' => 'error',
+                'message' => 'No valid fields provided for update'
+            ];
+        }
+
+        $updates[] = "updated_at = NOW()";
+        $updates[] = "created_by = ?";
+        $params[] = $updatedBy;
+        $params[] = $organizationId;
+
+        $sql = "UPDATE organization_punch_settings SET " . implode(", ", $updates) . " WHERE organization_id = ?";
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute($params);
+
+        if ($stmt->rowCount() === 0) {
+            return [
+                'status' => 'error',
+                'message' => 'No settings found to update or no changes made'
+            ];
+        }
+
+        error_log("Updated punch settings for organization: $organizationId");
+
+        return [
+            'status' => 'success',
+            'message' => 'Punch settings updated successfully'
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in updatePunchSettings: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to update punch settings'
+        ];
+    }
+}
+
+function determinePunchType($organizationId, $currentTime) {
+    $settings = getOrganizationPunchSettings($organizationId);
+
+    if ($settings['status'] !== 'success') {
+        return 'in'; // Default fallback
+    }
+
+    $punchSettings = $settings['settings'];
+    $time = date('H:i:s', strtotime($currentTime));
+
+    // Check if time falls within punch in period
+    if ($time >= $punchSettings['punch_in_start_time'] && $time <= $punchSettings['punch_in_end_time']) {
+        return 'in';
+    }
+
+    // Check if time falls within punch out period
+    if ($time >= $punchSettings['punch_out_start_time'] && $time <= $punchSettings['punch_out_end_time']) {
+        return 'out';
+    }
+
+    // If outside both periods, determine based on proximity
+    $punchInStart = strtotime($punchSettings['punch_in_start_time']);
+    $punchOutEnd = strtotime($punchSettings['punch_out_end_time']);
+    $currentTimeStamp = strtotime($time);
+
+    // If before punch in period, treat as early punch in
+    if ($currentTimeStamp < $punchInStart) {
+        return 'in';
+    }
+
+    // If after punch out period, treat as late punch out
+    if ($currentTimeStamp > $punchOutEnd) {
+        return 'out';
+    }
+
+    // Default to 'in' for edge cases
+    return 'in';
+}
+
+function isLatePunch($organizationId, $punchType, $punchTime) {
+    $settings = getOrganizationPunchSettings($organizationId);
+
+    if ($settings['status'] !== 'success') {
+        return false;
+    }
+
+    $punchSettings = $settings['settings'];
+    $time = date('H:i:s', strtotime($punchTime));
+    $gracePeriod = $punchSettings['grace_period_minutes'] ?? 15;
+
+    if ($punchType === 'in') {
+        $deadline = date('H:i:s', strtotime($punchSettings['punch_in_end_time'] . " + {$gracePeriod} minutes"));
+        return $time > $deadline;
+    }
+
+    return false; // We don't typically consider punch out as late
+}
+
+function isEarlyPunch($organizationId, $punchType, $punchTime) {
+    $settings = getOrganizationPunchSettings($organizationId);
+
+    if ($settings['status'] !== 'success') {
+        return false;
+    }
+
+    $punchSettings = $settings['settings'];
+    $time = date('H:i:s', strtotime($punchTime));
+
+    if ($punchType === 'out') {
+        return $time < $punchSettings['punch_out_start_time'];
+    }
+
+    return false;
+}
+
+// ===============================
+// ENHANCED ATTENDANCE FUNCTIONS
+// ===============================
+
+function logAttendancePunch($userId, $punchingCode, $organizationId, $deviceSerial, $punchDateTime, $ipAddress = null) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $punchDate = date('Y-m-d', strtotime($punchDateTime));
+        $punchTime = date('H:i:s', strtotime($punchDateTime));
+        $punchType = determinePunchType($organizationId, $punchDateTime);
+        $isLate = isLatePunch($organizationId, $punchType, $punchDateTime);
+        $isEarly = isEarlyPunch($organizationId, $punchType, $punchDateTime);
+
+        // Insert into attendance_logs
+        $stmt = $pdoConn->prepare("
+            INSERT INTO attendance_logs
+            (punching_code, user_id, organization_id, device_serial, punch_date, punch_time, punch_datetime,
+             punch_type, is_late, is_early, ip_address)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+
+        $stmt->execute([
+            $punchingCode, $userId, $organizationId, $deviceSerial, $punchDate, $punchTime,
+            $punchDateTime, $punchType, $isLate, $isEarly, $ipAddress
+        ]);
+
+        // Update or create daily attendance record
+        updateDailyAttendance($userId, $punchingCode, $organizationId, $punchDate);
+
+        return [
+            'status' => 'success',
+            'punch_type' => $punchType,
+            'is_late' => $isLate,
+            'is_early' => $isEarly
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in logAttendancePunch: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to log attendance punch'
+        ];
+    }
+}
+
+function updateDailyAttendance($userId, $punchingCode, $organizationId, $date) {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Get all punches for this user on this date
+        $stmt = $pdoConn->prepare("
+            SELECT punch_type, punch_time, is_late, is_early
+            FROM attendance_logs
+            WHERE user_id = ? AND punch_date = ?
+            ORDER BY punch_time ASC
+        ");
+        $stmt->execute([$userId, $date]);
+        $punches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $punchInTime = null;
+        $punchOutTime = null;
+        $isLate = false;
+        $isEarlyOut = false;
+        $lateMinutes = 0;
+        $earlyOutMinutes = 0;
+
+        foreach ($punches as $punch) {
+            if ($punch['punch_type'] === 'in' && !$punchInTime) {
+                $punchInTime = $punch['punch_time'];
+                $isLate = $punch['is_late'];
+
+                if ($isLate) {
+                    $settings = getOrganizationPunchSettings($organizationId);
+                    if ($settings['status'] === 'success') {
+                        $expectedTime = $settings['settings']['punch_in_end_time'];
+                        $lateMinutes = max(0, (strtotime($punchInTime) - strtotime($expectedTime)) / 60);
+                    }
+                }
+            }
+
+            if ($punch['punch_type'] === 'out') {
+                $punchOutTime = $punch['punch_time'];
+                $isEarlyOut = $punch['is_early'];
+
+                if ($isEarlyOut) {
+                    $settings = getOrganizationPunchSettings($organizationId);
+                    if ($settings['status'] === 'success') {
+                        $expectedTime = $settings['settings']['punch_out_start_time'];
+                        $earlyOutMinutes = max(0, (strtotime($expectedTime) - strtotime($punchOutTime)) / 60);
+                    }
+                }
+            }
+        }
+
+        // Calculate total hours and status
+        $totalHours = 0;
+        $status = 'absent';
+
+        if ($punchInTime && $punchOutTime) {
+            $totalHours = (strtotime($punchOutTime) - strtotime($punchInTime)) / 3600;
+            $status = $isLate ? 'late' : ($isEarlyOut ? 'early_out' : 'present');
+        } elseif ($punchInTime) {
+            $status = 'partial';
+        }
+
+        // Insert or update daily attendance
+        $stmt = $pdoConn->prepare("
+            INSERT INTO daily_attendance
+            (user_id, punching_code, organization_id, attendance_date, punch_in_time, punch_out_time,
+             total_hours, status, is_late, is_early_out, late_minutes, early_out_minutes, auto_generated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+            ON DUPLICATE KEY UPDATE
+            punch_in_time = VALUES(punch_in_time),
+            punch_out_time = VALUES(punch_out_time),
+            total_hours = VALUES(total_hours),
+            status = VALUES(status),
+            is_late = VALUES(is_late),
+            is_early_out = VALUES(is_early_out),
+            late_minutes = VALUES(late_minutes),
+            early_out_minutes = VALUES(early_out_minutes),
+            updated_at = NOW()
+        ");
+
+        $stmt->execute([
+            $userId, $punchingCode, $organizationId, $date, $punchInTime, $punchOutTime,
+            $totalHours, $status, $isLate, $isEarlyOut, $lateMinutes, $earlyOutMinutes
+        ]);
+
+        return true;
+
+    } catch (PDOException $e) {
+        error_log("Database error in updateDailyAttendance: " . $e->getMessage());
+        return false;
+    }
+}
+
+function generateAbsenceRecords($organizationId, $date = null) {
+    $pdoConn = getValidConnection();
+
+    if (!$date) {
+        $date = date('Y-m-d');
+    }
+
+    try {
+        // Get all active users in the organization
+        $stmt = $pdoConn->prepare("
+            SELECT id, punching_code FROM users
+            WHERE organization_id = ? AND status = 'active'
+        ");
+        $stmt->execute([$organizationId]);
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $absenceCount = 0;
+
+        foreach ($users as $user) {
+            // Check if user has any attendance record for this date
+            $stmt = $pdoConn->prepare("
+                SELECT id, status FROM daily_attendance
+                WHERE user_id = ? AND attendance_date = ?
+            ");
+            $stmt->execute([$user['id'], $date]);
+            $attendance = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$attendance) {
+                // Create absence record
+                $stmt = $pdoConn->prepare("
+                    INSERT INTO daily_attendance
+                    (user_id, punching_code, organization_id, attendance_date, status, auto_generated)
+                    VALUES (?, ?, ?, ?, 'absent', TRUE)
+                ");
+                $stmt->execute([$user['id'], $user['punching_code'], $organizationId, $date]);
+
+                // Create absence tracking record
+                $stmt = $pdoConn->prepare("
+                    INSERT INTO absence_records
+                    (user_id, organization_id, absence_date, absence_type)
+                    VALUES (?, ?, ?, 'absent')
+                ");
+                $stmt->execute([$user['id'], $organizationId, $date]);
+
+                $absenceCount++;
+            } elseif ($attendance['status'] === 'partial') {
+                // Check what type of partial attendance
+                $stmt = $pdoConn->prepare("
+                    SELECT punch_in_time, punch_out_time FROM daily_attendance
+                    WHERE user_id = ? AND attendance_date = ?
+                ");
+                $stmt->execute([$user['id'], $date]);
+                $punchData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                $absenceType = null;
+                if (!$punchData['punch_in_time']) {
+                    $absenceType = 'no_punch_in';
+                } elseif (!$punchData['punch_out_time']) {
+                    $absenceType = 'no_punch_out';
+                }
+
+                if ($absenceType) {
+                    $stmt = $pdoConn->prepare("
+                        INSERT IGNORE INTO absence_records
+                        (user_id, organization_id, absence_date, absence_type)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    $stmt->execute([$user['id'], $organizationId, $date, $absenceType]);
+                }
+            }
+        }
+
+        return [
+            'status' => 'success',
+            'absence_records_created' => $absenceCount
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in generateAbsenceRecords: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to generate absence records'
+        ];
+    }
+}
+
+// ===============================
+// ATTENDANCE REPORTING FUNCTIONS
+// ===============================
+
+function getOrganizationAttendance($organizationId, $dateFrom = null, $dateTo = null) {
+    $pdoConn = getValidConnection();
+
+    if (!$dateFrom) $dateFrom = date('Y-m-d');
+    if (!$dateTo) $dateTo = $dateFrom;
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT da.*, u.name as user_name, u.email, u.punching_code
+            FROM daily_attendance da
+            INNER JOIN users u ON da.user_id = u.id
+            WHERE da.organization_id = ? AND da.attendance_date BETWEEN ? AND ?
+            ORDER BY da.attendance_date DESC, u.name ASC
+        ");
+        $stmt->execute([$organizationId, $dateFrom, $dateTo]);
+        $attendance = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Get summary statistics
+        $stats = [
+            'total_records' => count($attendance),
+            'present' => 0,
+            'absent' => 0,
+            'late' => 0,
+            'partial' => 0,
+            'early_out' => 0
+        ];
+
+        foreach ($attendance as $record) {
+            $stats[$record['status']]++;
+        }
+
+        return [
+            'status' => 'success',
+            'date_range' => ['from' => $dateFrom, 'to' => $dateTo],
+            'attendance_records' => $attendance,
+            'summary' => $stats
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getOrganizationAttendance: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve attendance data'
+        ];
+    }
+}
+
+function getUserAttendanceReport($userId, $dateFrom = null, $dateTo = null) {
+    $pdoConn = getValidConnection();
+
+    if (!$dateFrom) $dateFrom = date('Y-m-d', strtotime('-30 days'));
+    if (!$dateTo) $dateTo = date('Y-m-d');
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT da.*, u.name as user_name, u.email, u.punching_code
+            FROM daily_attendance da
+            INNER JOIN users u ON da.user_id = u.id
+            WHERE da.user_id = ? AND da.attendance_date BETWEEN ? AND ?
+            ORDER BY da.attendance_date DESC
+        ");
+        $stmt->execute([$userId, $dateFrom, $dateTo]);
+        $attendance = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Calculate statistics
+        $totalDays = count($attendance);
+        $presentDays = 0;
+        $lateDays = 0;
+        $totalHours = 0;
+
+        foreach ($attendance as $record) {
+            if (in_array($record['status'], ['present', 'late', 'early_out'])) {
+                $presentDays++;
+                $totalHours += $record['total_hours'];
+            }
+            if ($record['is_late']) {
+                $lateDays++;
+            }
+        }
+
+        $attendanceRate = $totalDays > 0 ? ($presentDays / $totalDays) * 100 : 0;
+        $averageHours = $presentDays > 0 ? $totalHours / $presentDays : 0;
+
+        return [
+            'status' => 'success',
+            'date_range' => ['from' => $dateFrom, 'to' => $dateTo],
+            'attendance_records' => $attendance,
+            'statistics' => [
+                'total_days' => $totalDays,
+                'present_days' => $presentDays,
+                'absent_days' => $totalDays - $presentDays,
+                'late_days' => $lateDays,
+                'attendance_rate' => round($attendanceRate, 2),
+                'total_hours_worked' => round($totalHours, 2),
+                'average_hours_per_day' => round($averageHours, 2)
+            ]
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getUserAttendanceReport: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve user attendance report'
+        ];
+    }
+}
+
+function getTodayAttendanceStatus($organizationId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT
+                u.id as user_id,
+                u.punching_code,
+                u.name as user_name,
+                da.punch_in_time,
+                da.punch_out_time,
+                da.status,
+                da.is_late,
+                da.late_minutes,
+                CASE
+                    WHEN da.punch_in_time IS NOT NULL AND da.punch_out_time IS NOT NULL THEN 'completed'
+                    WHEN da.punch_in_time IS NOT NULL AND da.punch_out_time IS NULL THEN 'in_progress'
+                    WHEN da.punch_in_time IS NULL THEN 'not_started'
+                END as current_status
+            FROM users u
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND da.attendance_date = CURDATE()
+            WHERE u.organization_id = ? AND u.status = 'active'
+            ORDER BY u.name ASC
+        ");
+        $stmt->execute([$organizationId]);
+        $todayAttendance = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Count status
+        $statusCounts = [
+            'completed' => 0,
+            'in_progress' => 0,
+            'not_started' => 0,
+            'late' => 0
+        ];
+
+        foreach ($todayAttendance as $record) {
+            $statusCounts[$record['current_status']]++;
+            if ($record['is_late']) {
+                $statusCounts['late']++;
+            }
+        }
+
+        return [
+            'status' => 'success',
+            'date' => date('Y-m-d'),
+            'attendance_status' => $todayAttendance,
+            'summary' => $statusCounts
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getTodayAttendanceStatus: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve today\'s attendance status'
+        ];
+    }
+}
+
+function getAbsenceReport($organizationId, $dateFrom = null, $dateTo = null) {
+    $pdoConn = getValidConnection();
+
+    if (!$dateFrom) $dateFrom = date('Y-m-d', strtotime('-7 days'));
+    if (!$dateTo) $dateTo = date('Y-m-d');
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT
+                ar.*,
+                u.name as user_name,
+                u.email,
+                u.punching_code,
+                a.username as excused_by_name
+            FROM absence_records ar
+            INNER JOIN users u ON ar.user_id = u.id
+            LEFT JOIN admins a ON ar.excused_by = a.id
+            WHERE ar.organization_id = ? AND ar.absence_date BETWEEN ? AND ?
+            ORDER BY ar.absence_date DESC, u.name ASC
+        ");
+        $stmt->execute([$organizationId, $dateFrom, $dateTo]);
+        $absences = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Group by absence type
+        $typeGroups = [
+            'absent' => [],
+            'no_punch_in' => [],
+            'no_punch_out' => [],
+            'both_missing' => []
+        ];
+
+        foreach ($absences as $absence) {
+            $typeGroups[$absence['absence_type']][] = $absence;
+        }
+
+        return [
+            'status' => 'success',
+            'date_range' => ['from' => $dateFrom, 'to' => $dateTo],
+            'absence_records' => $absences,
+            'grouped_by_type' => $typeGroups,
+            'total_absences' => count($absences)
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getAbsenceReport: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve absence report'
         ];
     }
 }

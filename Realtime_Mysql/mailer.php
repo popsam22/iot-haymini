@@ -11,7 +11,7 @@
   function sendEmail($to, $message, $subject){
     $mail = new PHPMailer(true);
     try {
-    $mail->SMTPDebug = SMTP::DEBUG_SERVER;                      
+    $mail->SMTPDebug = SMTP::DEBUG_OFF;                      
     $mail->isSMTP();                                                 
     $mail->Host       = $_ENV['MAILER_HOST'];             
     $mail->SMTPAuth   = true;                                                   
@@ -25,14 +25,15 @@
     $mail->addAddress($to);
 
     //Content
-    $mail->isHTML(false);                                 
+    $mail->isHTML(true);                                 
     $mail->Subject = $subject;
     $mail->Body    = $message;
 
     $mail->send();
-    echo 'Message has been sent';
+    return true;
   } catch (Exception $e) {
-    echo "Message could not be sent. Mailer Error: {$mail->ErrorInfo}";
+    error_log("Mailer Error: {$mail->ErrorInfo}");
+    return false;
   }
 }
 ?>
