@@ -1982,7 +1982,7 @@ function getDevicesByOrganization($organization_id) {
     
     try {
         $stmt = $pdoConn->prepare("
-            SELECT d.*, o.name as organization_name
+            SELECT d.*, o.name as organization_name, o.status as organization_status
             FROM devices d
             LEFT JOIN organizations o ON d.organization_id = o.id
             WHERE d.organization_id = ?
@@ -2057,7 +2057,7 @@ function getUsersByOrganization($organization_id) {
     
     try {
         $stmt = $pdoConn->prepare("
-            SELECT u.*, o.name as organization_name
+            SELECT u.*, o.name as organization_name, o.status as organization_status
             FROM users u
             LEFT JOIN organizations o ON u.organization_id = o.id
             WHERE u.organization_id = ?
@@ -2088,8 +2088,8 @@ function getAllLogs() {
 	$pdoConn = getValidConnection();
 
 	try {
-        $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid, 
-                       u.id as user_id, t.organization_id, u.name, o.name as organization_name 
+        $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
+                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
@@ -2114,7 +2114,7 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
     try {
         if ($organization_id) {
             $stmt = $pdoConn->prepare("
-                SELECT t.*, u.name, o.name as organization_name 
+                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
@@ -2125,7 +2125,7 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
             $stmt->bindParam(':organization_id', $organization_id, PDO::PARAM_INT);
         } else {
             $stmt = $pdoConn->prepare("
-                SELECT t.*, u.name, o.name as organization_name 
+                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
@@ -2157,7 +2157,7 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
     
     try {
         $sql = "
-            SELECT t.*, u.name, u.email, u.phone_number, o.name as organization_name,
+            SELECT t.*, u.name, u.email, u.phone_number, o.name as organization_name, o.status as organization_status,
                    d.device_name, d.serial_number
             FROM tblt_timesheet t
             LEFT JOIN users u ON t.punchingcode = u.punching_code
@@ -2305,9 +2305,9 @@ function getOrganization($organization_id) {
     try {
         // Get organization details
         $stmt = $pdoConn->prepare("
-            SELECT id, name, description, address, contact_person, email, phone, 
-                   created_at as dateJoined, updated_at
-            FROM organizations 
+            SELECT id, name, description, address, contact_person, email, phone,
+                   status, created_at as dateJoined, updated_at
+            FROM organizations
             WHERE id = ?
         ");
         $stmt->execute([$organization_id]);
@@ -2516,7 +2516,7 @@ function getDeviceDetails($serial_number) {
     try {
         // Get device details with organization info
         $stmt = $pdoConn->prepare("
-            SELECT d.*, o.name as organization_name
+            SELECT d.*, o.name as organization_name, o.status as organization_status
             FROM devices d
             LEFT JOIN organizations o ON d.organization_id = o.id
             WHERE d.serial_number = ?
@@ -2550,8 +2550,8 @@ function getLogsByDevice($device_serial) {
     $pdoConn = getValidConnection();
     
     try {
-        $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid, 
-                       u.id as user_id, t.organization_id, u.name, o.name as organization_name 
+        $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
+                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
