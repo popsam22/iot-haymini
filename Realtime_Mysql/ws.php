@@ -2377,8 +2377,8 @@ function getAllOrganizations() {
     try {
         // Get all organizations with summary data
         $stmt = $pdoConn->prepare("
-            SELECT o.id, o.name, o.description, o.address, o.contact_person, o.email, o.phone, 
-                   o.created_at as dateJoined, o.updated_at,
+            SELECT o.id, o.name, o.description, o.address, o.contact_person, o.email, o.phone,
+                   o.status, o.created_at as dateJoined, o.updated_at,
                    COUNT(DISTINCT d.id) as device_count,
                    COUNT(DISTINCT u.id) as user_count
             FROM organizations o
