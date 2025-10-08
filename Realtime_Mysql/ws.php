@@ -544,7 +544,7 @@ switch ($requestMethod) {
                 break;
             }
 
-            $defaultOrganizationId = $jsonInput['organization_id'] ?? null;
+            $defaultOrganizationId = $_POST['organization_id'] ?? null;
             echo json_encode(uploadUsersFromCSV($csvFile, $defaultOrganizationId));
 
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/generate-absence-records$/', $path, $matches)) {
@@ -1801,12 +1801,15 @@ function bulkCreateUsers($users_data, $organization_id = null) {
         $pdoConn->beginTransaction();
         
         foreach ($users_data as $index => $userData) {
+            // Use individual row organization_id if provided, otherwise use the default
+            $userOrgId = $userData['organization_id'] ?? $organization_id;
+
             $result = getOrCreateUser(
                 $userData['punching_code'] ?? null,
                 $userData['name'] ?? null,
                 $userData['phone'] ?? null,
                 $userData['email'] ?? null,
-                $organization_id
+                $userOrgId
             );
             
             switch ($result['status']) {
@@ -3463,8 +3466,8 @@ function uploadUsersFromCSV($csvFile, $defaultOrganizationId = null) {
             }
         }
 
-        // Use existing bulk creation function
-        $bulkResults = bulkCreateUsers($parseResults['valid_rows'], $defaultOrganizationId);
+        // Use existing bulk creation function (don't pass defaultOrganizationId as it's already set in rows)
+        $bulkResults = bulkCreateUsers($parseResults['valid_rows'], null);
 
         // Combine results
         $response = [
