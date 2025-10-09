@@ -259,8 +259,12 @@ switch ($requestMethod) {
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
             echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo));
-            
-       
+
+        } elseif (preg_match('/\/api\/organizations\/(\d+)\/device-assignments$/', $path, $matches)) {
+            $organizationId = (int)$matches[1];
+            echo json_encode(getOrganizationDeviceAssignments($organizationId));
+
+
         } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
             $punchingCode = $matches[1];
             $organizationId = $queryParams['organization_id'] ?? null;
@@ -385,6 +389,7 @@ switch ($requestMethod) {
                     'assignments' => [
                         'GET /api/users/{user_id}/devices' => 'Get devices assigned to user',
                         'GET /api/devices/{device_id}/users' => 'Get users assigned to device',
+                        'GET /api/organizations/{organization_id}/device-assignments' => 'Get all device assignments for organization',
                         'POST /api/users/{user_id}/devices/{device_id}/assign' => 'Assign user to device',
                         'POST /api/devices/{device_id}/users/bulk-assign' => 'Bulk assign users to device',
                         'DELETE /api/users/{user_id}/devices/{device_id}/assign' => 'Remove user from device'
@@ -3318,6 +3323,53 @@ function bulkAssignUsersToDevice($deviceId, $userIds, $assignedBy) {
         return [
             'status' => 'error',
             'message' => 'Bulk assignment failed: ' . $e->getMessage()
+        ];
+    }
+}
+
+function getOrganizationDeviceAssignments($organizationId) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $stmt = $pdoConn->prepare("
+            SELECT
+                uda.id,
+                uda.user_id,
+                uda.device_id,
+                uda.assigned_at,
+                uda.assigned_by,
+                u.punching_code,
+                u.name as user_name,
+                u.email as user_email,
+                d.serial_number as device_serial,
+                d.device_name,
+                d.device_model,
+                d.organization_id,
+                o.name as organization_name,
+                a.username as assigned_by_username
+            FROM user_device_assignments uda
+            INNER JOIN users u ON uda.user_id = u.id
+            INNER JOIN devices d ON uda.device_id = d.id
+            INNER JOIN organizations o ON d.organization_id = o.id
+            LEFT JOIN admins a ON uda.assigned_by = a.id
+            WHERE d.organization_id = ? AND uda.status = 'active'
+            ORDER BY uda.assigned_at DESC
+        ");
+        $stmt->execute([$organizationId]);
+        $assignments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return [
+            'status' => 'success',
+            'message' => 'Organization device assignments retrieved successfully',
+            'total_count' => count($assignments),
+            'assignments' => $assignments
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Database error in getOrganizationDeviceAssignments: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to retrieve organization device assignments'
         ];
     }
 }
