@@ -437,29 +437,37 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/users$/', $path)) {
-            if (!$jsonInput || empty($jsonInput['punching_code']) || empty($jsonInput['name']) || 
+            requireAuth();
+            $user = requireAuth();
+
+            if (!$jsonInput || empty($jsonInput['punching_code']) || empty($jsonInput['name']) ||
                 empty($jsonInput['phone']) || empty($jsonInput['email'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Missing required fields: punching_code, name, phone, email']);
                 break;
             }
-            
+
             echo json_encode(getOrCreateUser(
                 $jsonInput['punching_code'],
                 $jsonInput['name'],
                 $jsonInput['phone'],
                 $jsonInput['email'],
-                $jsonInput['organization_id'] ?? null
+                $jsonInput['organization_id'] ?? null,
+                $jsonInput['device_id'] ?? null,
+                $user['admin_id']
             ));
             
         } elseif (preg_match('/\/api\/users\/bulk$/', $path)) {
+            requireAuth();
+            $user = requireAuth();
+
             if (!$jsonInput || !isset($jsonInput['users'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Missing required field: users array']);
                 break;
             }
-            
-            echo json_encode(bulkCreateUsers($jsonInput['users'], $jsonInput['organization_id'] ?? null));
+
+            echo json_encode(bulkCreateUsers($jsonInput['users'], $jsonInput['organization_id'] ?? null, $user['admin_id']));
             
         } elseif (preg_match('/\/api\/devices$/', $path)) {
             requireAuth();
@@ -1610,7 +1618,7 @@ function store($records, $deviceSerial, $sts = 0) {
     return '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '","message":"' . $reason . '","notifications":' . $successfulNotifications . ',"organization_id":' . $organizationId . '}';
 }
 
-function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id = null) {
+function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id = null, $device_id = null, $assigned_by = null) {
     $pdoConn = getValidConnection();
     
     try {
@@ -1698,7 +1706,7 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
                 $stmt = $pdoConn->prepare($sql);
                 $stmt->execute($params);
                 
-                return [
+                $result = [
                     "status" => "updated",
                     "message" => "User updated with new information",
                     "user_id" => $existingUser['id'],
@@ -1706,14 +1714,54 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
                     "organization_name" => $orgName,
                     "changes_made" => count($params) - 1
                 ];
+
+                // Assign device if device_id and organization_id are provided
+                if ($device_id !== null && $assigned_by !== null && $organization_id !== null) {
+                    // Validate that device belongs to the same organization
+                    $stmt = $pdoConn->prepare("SELECT organization_id FROM devices WHERE id = ?");
+                    $stmt->execute([$device_id]);
+                    $deviceOrgId = $stmt->fetchColumn();
+
+                    if ($deviceOrgId && $deviceOrgId == $organization_id) {
+                        $assignmentResult = assignUserToDevice($existingUser['id'], $device_id, $assigned_by);
+                        $result['device_assignment'] = $assignmentResult;
+                    } else {
+                        $result['device_assignment'] = [
+                            'status' => 'error',
+                            'message' => 'Device does not belong to the user\'s organization'
+                        ];
+                    }
+                }
+
+                return $result;
             } else {
-                return [
+                $result = [
                     "status" => "exists",
                     "message" => "User already exists with current information",
                     "user_id" => $existingUser['id'],
                     "organization_id" => $existingUser['organization_id'],
                     "organization_name" => $orgName
                 ];
+
+                // Assign device if device_id and organization_id are provided
+                if ($device_id !== null && $assigned_by !== null && $organization_id !== null) {
+                    // Validate that device belongs to the same organization
+                    $stmt = $pdoConn->prepare("SELECT organization_id FROM devices WHERE id = ?");
+                    $stmt->execute([$device_id]);
+                    $deviceOrgId = $stmt->fetchColumn();
+
+                    if ($deviceOrgId && $deviceOrgId == $organization_id) {
+                        $assignmentResult = assignUserToDevice($existingUser['id'], $device_id, $assigned_by);
+                        $result['device_assignment'] = $assignmentResult;
+                    } else {
+                        $result['device_assignment'] = [
+                            'status' => 'error',
+                            'message' => 'Device does not belong to the user\'s organization'
+                        ];
+                    }
+                }
+
+                return $result;
             }
         }
 
@@ -1727,14 +1775,34 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
         $newUserId = $pdoConn->lastInsertId();
         
         error_log("Created new user: $punching_code in organization $organization_id ($orgName)");
-        
-        return [
+
+        $result = [
             "status" => "created",
             "message" => "New user created successfully",
             "user_id" => $newUserId,
             "organization_id" => $organization_id,
             "organization_name" => $orgName
         ];
+
+        // Assign device if device_id and organization_id are provided
+        if ($device_id !== null && $assigned_by !== null && $organization_id !== null) {
+            // Validate that device belongs to the same organization
+            $stmt = $pdoConn->prepare("SELECT organization_id FROM devices WHERE id = ?");
+            $stmt->execute([$device_id]);
+            $deviceOrgId = $stmt->fetchColumn();
+
+            if ($deviceOrgId && $deviceOrgId == $organization_id) {
+                $assignmentResult = assignUserToDevice($newUserId, $device_id, $assigned_by);
+                $result['device_assignment'] = $assignmentResult;
+            } else {
+                $result['device_assignment'] = [
+                    'status' => 'error',
+                    'message' => 'Device does not belong to the user\'s organization'
+                ];
+            }
+        }
+
+        return $result;
         
     } catch (PDOException $e) {
         error_log("Database error in getOrCreateUser: " . $e->getMessage());
@@ -1792,7 +1860,7 @@ function deactivateUser($punching_code) {
     }
 }
 
-function bulkCreateUsers($users_data, $organization_id = null) {
+function bulkCreateUsers($users_data, $organization_id = null, $assigned_by = null) {
     $pdoConn = getValidConnection();
     
     try {
@@ -1814,7 +1882,9 @@ function bulkCreateUsers($users_data, $organization_id = null) {
                 $userData['name'] ?? null,
                 $userData['phone'] ?? null,
                 $userData['email'] ?? null,
-                $userOrgId
+                $userOrgId,
+                $userData['device_id'] ?? null,  // Optional device assignment for bulk creation
+                $assigned_by
             );
             
             switch ($result['status']) {
