@@ -2092,10 +2092,16 @@ function getAllLogs() {
 
 	try {
         $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
-                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status
+                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status,
+                       al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                       da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                    AND t.date = al.punch_date AND t.time = al.punch_time
+                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
                 ORDER BY t.date DESC, t.time DESC';
         $stmt = $pdoConn->prepare($sql);
         $stmt->execute();
@@ -2117,10 +2123,16 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
     try {
         if ($organization_id) {
             $stmt = $pdoConn->prepare("
-                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status
+                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
+                       al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                       da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                    AND t.date = al.punch_date AND t.time = al.punch_time
+                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
                 WHERE t.punchingcode = :punchingCode AND t.organization_id = :organization_id
                 ORDER BY t.date DESC, t.time DESC
             ");
@@ -2128,10 +2140,16 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
             $stmt->bindParam(':organization_id', $organization_id, PDO::PARAM_INT);
         } else {
             $stmt = $pdoConn->prepare("
-                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status
+                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
+                       al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                       da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                    AND t.date = al.punch_date AND t.time = al.punch_time
+                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
                 WHERE t.punchingcode = :punchingCode
                 ORDER BY t.date DESC, t.time DESC
             ");
@@ -2161,11 +2179,17 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
     try {
         $sql = "
             SELECT t.*, u.name, u.email, u.phone_number, o.name as organization_name, o.status as organization_status,
-                   d.device_name, d.serial_number
+                   d.device_name, d.serial_number,
+                   al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                   da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                   da.late_minutes, da.early_out_minutes, da.overtime_hours
             FROM tblt_timesheet t
             LEFT JOIN users u ON t.punchingcode = u.punching_code
             LEFT JOIN organizations o ON t.organization_id = o.id
             LEFT JOIN devices d ON t.device_serial = d.serial_number
+            LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                AND t.date = al.punch_date AND t.time = al.punch_time
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
             WHERE t.organization_id = ?
         ";
         
@@ -2554,10 +2578,16 @@ function getLogsByDevice($device_serial) {
     
     try {
         $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
-                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status
+                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status,
+                       al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                       da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                    AND t.date = al.punch_date AND t.time = al.punch_time
+                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
                 WHERE t.Tid = ?
                 ORDER BY t.date DESC, t.time DESC';
         
