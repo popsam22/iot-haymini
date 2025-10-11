@@ -61,7 +61,7 @@ try {
     echo "Step 4: Creating new users table...\n";
     $sql = "CREATE TABLE users (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        punching_code VARCHAR(20) UNIQUE NOT NULL,
+        punching_code VARCHAR(20) NOT NULL,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255),
         phone_number VARCHAR(20),
@@ -69,13 +69,14 @@ try {
         status ENUM('active', 'inactive') DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        
+
         FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-        INDEX idx_punching_code (punching_code),
+        UNIQUE KEY unique_punching_code_per_org (punching_code, organization_id),
+        INDEX idx_org_punching_code (organization_id, punching_code),
         INDEX idx_organization (organization_id)
     )";
     $pdoConn->exec($sql);
-    echo "✓ Users table created with organization support\n";
+    echo "✓ Users table created with organization support (punching codes unique per org)\n";
     
     // Step 5: Add columns to timesheet if they don't exist
     echo "Step 5: Updating timesheet table...\n";

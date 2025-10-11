@@ -591,12 +591,18 @@ switch ($requestMethod) {
             ));
             
         } elseif (preg_match('/\/api\/users\/([^\/]+)\/activate$/', $path, $matches)) {
+            $user = requireAuth();
             $punchingCode = $matches[1];
-            echo json_encode(activateUser($punchingCode));
-            
+            // Use organization_id from request body, or default to authenticated user's org
+            $orgId = $jsonInput['organization_id'] ?? $user['organization_id'];
+            echo json_encode(activateUser($punchingCode, $orgId));
+
         } elseif (preg_match('/\/api\/users\/([^\/]+)\/deactivate$/', $path, $matches)) {
+            $user = requireAuth();
             $punchingCode = $matches[1];
-            echo json_encode(deactivateUser($punchingCode));
+            // Use organization_id from request body, or default to authenticated user's org
+            $orgId = $jsonInput['organization_id'] ?? $user['organization_id'];
+            echo json_encode(deactivateUser($punchingCode, $orgId));
             
         } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
             $serialNumber = $matches[1];
@@ -1659,21 +1665,15 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
             ];
         }
         
-        // Check if user exists
-        $stmt = $pdoConn->prepare("SELECT id, name, email, phone_number, organization_id, status FROM users WHERE punching_code = ?");
-        $stmt->execute([$punching_code]);
+        // Check if user exists in this organization
+        $stmt = $pdoConn->prepare("SELECT id, name, email, phone_number, organization_id, status FROM users WHERE punching_code = ? AND organization_id = ?");
+        $stmt->execute([$punching_code, $organization_id]);
         $existingUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($existingUser) {
-            // User exists - check if we need to update organization or other details
+            // User exists in this organization - update other details if needed
             $updates = [];
             $params = [];
-            
-            if ($existingUser['organization_id'] != $organization_id) {
-                $updates[] = "organization_id = ?";
-                $params[] = $organization_id;
-                error_log("Updating user {$punching_code} organization from {$existingUser['organization_id']} to {$organization_id}");
-            }
             
             // Update other fields if they're different and not empty
             if (!empty($name) && $existingUser['name'] !== $name) {
@@ -1702,7 +1702,8 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
             // Perform update if needed
             if (count($params) > 0) {
                 $params[] = $punching_code; // For WHERE clause
-                $sql = "UPDATE users SET " . implode(", ", $updates) . " WHERE punching_code = ?";
+                $params[] = $organization_id; // For WHERE clause
+                $sql = "UPDATE users SET " . implode(", ", $updates) . " WHERE punching_code = ? AND organization_id = ?";
                 $stmt = $pdoConn->prepare($sql);
                 $stmt->execute($params);
                 
@@ -1822,18 +1823,18 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
 }
 
 // Enhanced user management functions
-function activateUser($punching_code) {
+function activateUser($punching_code, $organization_id) {
     $pdoConn = getValidConnection();
-    
+
     try {
-        $stmt = $pdoConn->prepare("UPDATE users SET status = 'active', updated_at = NOW() WHERE punching_code = ?");
-        $stmt->execute([$punching_code]);
-        
+        $stmt = $pdoConn->prepare("UPDATE users SET status = 'active', updated_at = NOW() WHERE punching_code = ? AND organization_id = ?");
+        $stmt->execute([$punching_code, $organization_id]);
+
         if ($stmt->rowCount() > 0) {
-            error_log("Activated user: $punching_code");
+            error_log("Activated user: $punching_code in organization: $organization_id");
             return ["status" => "success", "message" => "User activated successfully"];
         } else {
-            return ["status" => "error", "message" => "User not found"];
+            return ["status" => "error", "message" => "User not found in the specified organization"];
         }
     } catch (PDOException $e) {
         error_log("Error activating user: " . $e->getMessage());
@@ -1841,18 +1842,18 @@ function activateUser($punching_code) {
     }
 }
 
-function deactivateUser($punching_code) {
+function deactivateUser($punching_code, $organization_id) {
     $pdoConn = getValidConnection();
-    
+
     try {
-        $stmt = $pdoConn->prepare("UPDATE users SET status = 'inactive', updated_at = NOW() WHERE punching_code = ?");
-        $stmt->execute([$punching_code]);
-        
+        $stmt = $pdoConn->prepare("UPDATE users SET status = 'inactive', updated_at = NOW() WHERE punching_code = ? AND organization_id = ?");
+        $stmt->execute([$punching_code, $organization_id]);
+
         if ($stmt->rowCount() > 0) {
-            error_log("Deactivated user: $punching_code");
+            error_log("Deactivated user: $punching_code in organization: $organization_id");
             return ["status" => "success", "message" => "User deactivated successfully"];
         } else {
-            return ["status" => "error", "message" => "User not found"];
+            return ["status" => "error", "message" => "User not found in the specified organization"];
         }
     } catch (PDOException $e) {
         error_log("Error deactivating user: " . $e->getMessage());
@@ -2172,7 +2173,7 @@ function getAllLogs() {
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
-                LEFT JOIN users u ON t.punchingcode = u.punching_code
+                LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
@@ -2203,7 +2204,7 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
-                LEFT JOIN users u ON t.punchingcode = u.punching_code
+                LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
@@ -2220,7 +2221,7 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
-                LEFT JOIN users u ON t.punchingcode = u.punching_code
+                LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
@@ -2259,7 +2260,7 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
                    da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                    da.late_minutes, da.early_out_minutes, da.overtime_hours
             FROM tblt_timesheet t
-            LEFT JOIN users u ON t.punchingcode = u.punching_code
+            LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
             LEFT JOIN organizations o ON t.organization_id = o.id
             LEFT JOIN devices d ON t.device_serial = d.serial_number
             LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
@@ -2658,7 +2659,7 @@ function getLogsByDevice($device_serial) {
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
-                LEFT JOIN users u ON t.punchingcode = u.punching_code
+                LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
