@@ -315,6 +315,14 @@ switch ($requestMethod) {
             requireAuth();
             generateUserCSVTemplate();
 
+        } elseif (preg_match('/\/api\/users$/', $path)) {
+            requireAuth();
+            $search = $queryParams['search'] ?? null;
+            $organizationId = $queryParams['organization_id'] ?? null;
+            $userType = $queryParams['user_type'] ?? null;
+            $status = $queryParams['status'] ?? null;
+            echo json_encode(searchUsers($search, $organizationId, $userType, $status));
+
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/punch-settings$/', $path, $matches)) {
             requireAuth();
             $organizationId = (int)$matches[1];
@@ -367,6 +375,7 @@ switch ($requestMethod) {
                         'POST /api/organizations/{id}/generate-absence-records' => 'Generate absence records for date'
                     ],
                     'users' => [
+                        'GET /api/users' => 'Search users by punching code or name (supports filters: search, organization_id, user_type, status)',
                         'POST /api/users' => 'Create user',
                         'POST /api/users/bulk' => 'Bulk create users',
                         'POST /api/users/upload-csv' => 'Upload users from CSV file',
@@ -2212,6 +2221,69 @@ function getUsersByOrganization($organization_id, $user_name = null) {
         return [
             "status" => "error",
             "message" => "Database error retrieving users"
+        ];
+    }
+}
+
+function searchUsers($search = null, $organization_id = null, $user_type = null, $status = null) {
+    $pdoConn = getValidConnection();
+
+    try {
+        $sql = "
+            SELECT u.*, o.name as organization_name, o.status as organization_status
+            FROM users u
+            LEFT JOIN organizations o ON u.organization_id = o.id
+            WHERE 1=1
+        ";
+
+        $params = [];
+
+        // Search by punching code or name
+        if ($search) {
+            $sql .= " AND (u.punching_code LIKE ? OR u.name LIKE ?)";
+            $params[] = '%' . $search . '%';
+            $params[] = '%' . $search . '%';
+        }
+
+        if ($organization_id) {
+            $sql .= " AND u.organization_id = ?";
+            $params[] = $organization_id;
+        }
+
+        if ($user_type) {
+            $sql .= " AND u.user_type = ?";
+            $params[] = $user_type;
+        }
+
+        if ($status) {
+            $sql .= " AND u.status = ?";
+            $params[] = $status;
+        }
+
+        $sql .= " ORDER BY u.created_at DESC";
+
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute($params);
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return [
+            "status" => "success",
+            "message" => "Users retrieved successfully",
+            "filters" => [
+                "search" => $search,
+                "organization_id" => $organization_id,
+                "user_type" => $user_type,
+                "status" => $status
+            ],
+            "user_count" => count($users),
+            "users" => $users
+        ];
+
+    } catch (PDOException $e) {
+        error_log("Search users error: " . $e->getMessage());
+        return [
+            "status" => "error",
+            "message" => "Database error searching users"
         ];
     }
 }
