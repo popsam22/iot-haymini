@@ -3495,13 +3495,14 @@ function generateUserCSVTemplate() {
         'name',
         'email',
         'phone',
-        'organization_id'
+        'organization_id',
+        'user_type'
     ];
 
     $sampleData = [
-        ['U001', 'John Doe', 'john.doe@example.com', '1234567890', '1'],
-        ['U002', 'Jane Smith', 'jane.smith@example.com', '0987654321', '1'],
-        ['U003', 'Bob Johnson', 'bob.johnson@example.com', '5555551234', '2']
+        ['U001', 'John Doe', 'john.doe@example.com', '1234567890', '1', 'student'],
+        ['U002', 'Jane Smith', 'jane.smith@example.com', '0987654321', '1', 'staff'],
+        ['U003', 'Bob Johnson', 'bob.johnson@example.com', '5555551234', '2', 'student']
     ];
 
     // Set headers for CSV download
