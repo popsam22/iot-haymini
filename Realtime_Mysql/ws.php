@@ -248,7 +248,8 @@ switch ($requestMethod) {
             
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/users$/', $path, $matches)) {
             $organizationId = (int)$matches[1];
-            echo json_encode(getUsersByOrganization($organizationId));
+            $userName = $queryParams['user_name'] ?? null;
+            echo json_encode(getUsersByOrganization($organizationId, $userName));
             
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/devices$/', $path, $matches)) {
             $organizationId = (int)$matches[1];
@@ -258,7 +259,8 @@ switch ($requestMethod) {
             $organizationId = (int)$matches[1];
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
-            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo));
+            $userName = $queryParams['user_name'] ?? null;
+            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo, $userName));
 
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/device-assignments$/', $path, $matches)) {
             $organizationId = (int)$matches[1];
@@ -268,7 +270,9 @@ switch ($requestMethod) {
         } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
             $punchingCode = $matches[1];
             $organizationId = $queryParams['organization_id'] ?? null;
-            echo getLogsByPunchingCode($punchingCode, $organizationId);
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            echo getLogsByPunchingCode($punchingCode, $organizationId, $dateFrom, $dateTo);
             
        
         } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
@@ -277,7 +281,10 @@ switch ($requestMethod) {
             
 
         } elseif (preg_match('/\/api\/logs$/', $path)) {
-            echo getAllLogs();
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            $userName = $queryParams['user_name'] ?? null;
+            echo getAllLogs($dateFrom, $dateTo, $userName);
             
         } elseif (preg_match('/\/api\/logs\/export$/', $path)) {
              exportLogsToExcel();
@@ -285,7 +292,10 @@ switch ($requestMethod) {
         } elseif (preg_match('/\/api\/logs\/device\/([^\/]+)$/', $path, $matches)) {
             requireAuth();
             $deviceSerial = $matches[1];
-            echo json_encode(getLogsByDevice($deviceSerial));
+            $dateFrom = $queryParams['date_from'] ?? null;
+            $dateTo = $queryParams['date_to'] ?? null;
+            $userName = $queryParams['user_name'] ?? null;
+            echo json_encode(getLogsByDevice($deviceSerial, $dateFrom, $dateTo, $userName));
             
         } elseif (preg_match('/\/api\/admins$/', $path)) {
             requireSuperAdmin();
@@ -2162,24 +2172,37 @@ function updateDeviceStatus($serial_number, $status) {
     }
 }
 
-function getUsersByOrganization($organization_id) {
+function getUsersByOrganization($organization_id, $user_name = null) {
     $pdoConn = getValidConnection();
-    
+
     try {
-        $stmt = $pdoConn->prepare("
+        $sql = "
             SELECT u.*, o.name as organization_name, o.status as organization_status
             FROM users u
             LEFT JOIN organizations o ON u.organization_id = o.id
             WHERE u.organization_id = ?
-            ORDER BY u.created_at DESC
-        ");
-        $stmt->execute([$organization_id]);
+        ";
+
+        $params = [$organization_id];
+
+        if ($user_name) {
+            $sql .= " AND u.name LIKE ?";
+            $params[] = '%' . $user_name . '%';
+        }
+
+        $sql .= " ORDER BY u.created_at DESC";
+
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute($params);
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         return [
             "status" => "success",
             "message" => "Users retrieved successfully",
             "organization_id" => $organization_id,
+            "filters" => [
+                "user_name" => $user_name
+            ],
             "user_count" => count($users),
             "users" => $users
         ];
@@ -2194,7 +2217,7 @@ function getUsersByOrganization($organization_id) {
 }
 
 
-function getAllLogs() {
+function getAllLogs($date_from = null, $date_to = null, $user_name = null) {
 	$pdoConn = getValidConnection();
 
 	try {
@@ -2211,14 +2234,40 @@ function getAllLogs() {
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
                 LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
-                ORDER BY t.date DESC, t.time DESC';
+                WHERE 1=1';
+
+        $params = [];
+
+        if ($date_from) {
+            $sql .= ' AND t.date >= ?';
+            $params[] = $date_from;
+        }
+
+        if ($date_to) {
+            $sql .= ' AND t.date <= ?';
+            $params[] = $date_to;
+        }
+
+        if ($user_name) {
+            $sql .= ' AND u.name LIKE ?';
+            $params[] = '%' . $user_name . '%';
+        }
+
+        $sql .= ' ORDER BY t.date DESC, t.time DESC';
+
         $stmt = $pdoConn->prepare($sql);
-        $stmt->execute();
-        
+        $stmt->execute($params);
+
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         // Return the logs in JSON format
         return json_encode([
+            'status' => 'success',
+            'filters' => [
+                'date_from' => $date_from,
+                'date_to' => $date_to,
+                'user_name' => $user_name
+            ],
             'logs' => $logs,
             'total_count' => count($logs)
         ]);
@@ -2227,68 +2276,67 @@ function getAllLogs() {
     }
 }
 
-function getLogsByPunchingCode($punchingCode, $organization_id = null) {
+function getLogsByPunchingCode($punchingCode, $organization_id = null, $date_from = null, $date_to = null) {
     $pdoConn = getValidConnection();
     try {
+        $sql = "
+            SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
+                   d.device_name, d.serial_number,
+                   al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                   da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                   da.late_minutes, da.early_out_minutes, da.overtime_hours
+            FROM tblt_timesheet t
+            LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
+            LEFT JOIN organizations o ON t.organization_id = o.id
+            LEFT JOIN devices d ON t.device_serial = d.serial_number
+            LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                AND t.date = al.punch_date AND t.time = al.punch_time
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
+            WHERE t.punchingcode = ?
+        ";
+
+        $params = [$punchingCode];
+
         if ($organization_id) {
-            $stmt = $pdoConn->prepare("
-                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
-                       d.device_name, d.serial_number,
-                       al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
-                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
-                       da.late_minutes, da.early_out_minutes, da.overtime_hours
-                FROM tblt_timesheet t
-                LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
-                LEFT JOIN organizations o ON t.organization_id = o.id
-                LEFT JOIN devices d ON t.device_serial = d.serial_number
-                LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
-                    AND t.date = al.punch_date AND t.time = al.punch_time
-                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
-                WHERE t.punchingcode = :punchingCode AND t.organization_id = :organization_id
-                ORDER BY t.date DESC, t.time DESC
-            ");
-            $stmt->bindParam(':punchingCode', $punchingCode, PDO::PARAM_STR);
-            $stmt->bindParam(':organization_id', $organization_id, PDO::PARAM_INT);
-        } else {
-            $stmt = $pdoConn->prepare("
-                SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
-                       d.device_name, d.serial_number,
-                       al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
-                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
-                       da.late_minutes, da.early_out_minutes, da.overtime_hours
-                FROM tblt_timesheet t
-                LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
-                LEFT JOIN organizations o ON t.organization_id = o.id
-                LEFT JOIN devices d ON t.device_serial = d.serial_number
-                LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
-                    AND t.date = al.punch_date AND t.time = al.punch_time
-                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
-                WHERE t.punchingcode = :punchingCode
-                ORDER BY t.date DESC, t.time DESC
-            ");
-            $stmt->bindParam(':punchingCode', $punchingCode, PDO::PARAM_STR);
+            $sql .= " AND t.organization_id = ?";
+            $params[] = $organization_id;
         }
-        
-        // Execute the query
-        $stmt->execute();
-        // Fetch all matching records
+
+        if ($date_from) {
+            $sql .= " AND t.date >= ?";
+            $params[] = $date_from;
+        }
+
+        if ($date_to) {
+            $sql .= " AND t.date <= ?";
+            $params[] = $date_to;
+        }
+
+        $sql .= " ORDER BY t.date DESC, t.time DESC";
+
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute($params);
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        // Return results as JSON
+
         return json_encode([
+            'status' => 'success',
+            'filters' => [
+                'punching_code' => $punchingCode,
+                'organization_id' => $organization_id,
+                'date_from' => $date_from,
+                'date_to' => $date_to
+            ],
             'logs' => $logs,
-            'punching_code' => $punchingCode,
-            'organization_id' => $organization_id,
             'total_count' => count($logs)
         ]);
     } catch (PDOException $e) {
-        // Handle any errors, return as JSON error message
         return json_encode(['error' => $e->getMessage()]);
     }
 }
 
-function getLogsByOrganization($organization_id, $date_from = null, $date_to = null) {
+function getLogsByOrganization($organization_id, $date_from = null, $date_to = null, $user_name = null) {
     $pdoConn = getValidConnection();
-    
+
     try {
         $sql = "
             SELECT t.*, u.name, u.email, u.phone_number, u.user_type, o.name as organization_name, o.status as organization_status,
@@ -2305,19 +2353,24 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
             LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
             WHERE t.organization_id = ?
         ";
-        
+
         $params = [$organization_id];
-        
+
         if ($date_from) {
             $sql .= " AND t.date >= ?";
             $params[] = $date_from;
         }
-        
+
         if ($date_to) {
             $sql .= " AND t.date <= ?";
             $params[] = $date_to;
         }
-        
+
+        if ($user_name) {
+            $sql .= " AND u.name LIKE ?";
+            $params[] = '%' . $user_name . '%';
+        }
+
         $sql .= " ORDER BY t.date DESC, t.time DESC";
         
         $stmt = $pdoConn->prepare($sql);
@@ -2334,9 +2387,10 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
             "message" => "Logs retrieved successfully",
             "organization_id" => $organization_id,
             "organization_name" => $organization['name'] ?? 'Unknown',
-            "date_range" => [
-                "from" => $date_from,
-                "to" => $date_to
+            "filters" => [
+                "date_from" => $date_from,
+                "date_to" => $date_to,
+                "user_name" => $user_name
             ],
             "total_count" => count($logs),
             "logs" => $logs
@@ -2686,7 +2740,7 @@ function getDeviceDetails($serial_number) {
     }
 }
 
-function getLogsByDevice($device_serial) {
+function getLogsByDevice($device_serial, $date_from = null, $date_to = null, $user_name = null) {
     $pdoConn = getValidConnection();
 
     try {
@@ -2703,17 +2757,40 @@ function getLogsByDevice($device_serial) {
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
                 LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
-                WHERE t.Tid = ?
-                ORDER BY t.date DESC, t.time DESC';
-        
+                WHERE t.Tid = ?';
+
+        $params = [$device_serial];
+
+        if ($date_from) {
+            $sql .= ' AND t.date >= ?';
+            $params[] = $date_from;
+        }
+
+        if ($date_to) {
+            $sql .= ' AND t.date <= ?';
+            $params[] = $date_to;
+        }
+
+        if ($user_name) {
+            $sql .= ' AND u.name LIKE ?';
+            $params[] = '%' . $user_name . '%';
+        }
+
+        $sql .= ' ORDER BY t.date DESC, t.time DESC';
+
         $stmt = $pdoConn->prepare($sql);
-        $stmt->execute([$device_serial]);
+        $stmt->execute($params);
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         return [
             "status" => "success",
             "message" => "Logs retrieved successfully",
             "device_serial" => $device_serial,
+            "filters" => [
+                "date_from" => $date_from,
+                "date_to" => $date_to,
+                "user_name" => $user_name
+            ],
             "total_count" => count($logs),
             "logs" => $logs
         ];
