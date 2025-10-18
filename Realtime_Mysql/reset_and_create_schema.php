@@ -65,6 +65,7 @@ try {
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255),
         phone_number VARCHAR(20),
+        user_type ENUM('staff', 'student') NOT NULL DEFAULT 'student',
         organization_id INT,
         status ENUM('active', 'inactive') DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -73,7 +74,8 @@ try {
         FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
         UNIQUE KEY unique_punching_code_per_org (punching_code, organization_id),
         INDEX idx_org_punching_code (organization_id, punching_code),
-        INDEX idx_organization (organization_id)
+        INDEX idx_organization (organization_id),
+        INDEX idx_user_type (user_type)
     )";
     $pdoConn->exec($sql);
     echo "✓ Users table created with organization support (punching codes unique per org)\n";

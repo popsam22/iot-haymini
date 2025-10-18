@@ -454,7 +454,8 @@ switch ($requestMethod) {
                 $jsonInput['email'],
                 $jsonInput['organization_id'] ?? null,
                 $jsonInput['device_id'] ?? null,
-                $user['admin_id']
+                $user['admin_id'],
+                $jsonInput['user_type'] ?? 'student'
             ));
             
         } elseif (preg_match('/\/api\/users\/bulk$/', $path)) {
@@ -1522,17 +1523,34 @@ function store($records, $deviceSerial, $sts = 0) {
             if ($user && !empty($user['email']) && $user['organization_status'] === 'active') {
                 $userName = !empty($user['name']) ? $user['name'] : 'Unknown User';
                 $punchTime = date("Y-m-d H:i:s", strtotime($record["time"]));
-                
+
+                // Determine punch type and create appropriate message
+                $punchType = $punchResult['punch_type'] ?? 'unknown';
+                $punchTypeLabel = '';
+                $punchAction = '';
+
+                if ($punchType === 'in') {
+                    $punchTypeLabel = 'PUNCH IN';
+                    $punchAction = 'arrived at';
+                } elseif ($punchType === 'out') {
+                    $punchTypeLabel = 'PUNCH OUT';
+                    $punchAction = 'left';
+                } else {
+                    $punchTypeLabel = 'ATTENDANCE';
+                    $punchAction = 'was recorded at';
+                }
+
                 // Send email notification
-                $subject = 'Attendance Alert - New Record';
+                $subject = sprintf('Attendance Alert - %s', $punchTypeLabel);
                 $emailMessage = sprintf(
-                    'Dear Parent/Guardian, This is to notify you that %s (Card Number: %s) has been recorded at %s on %s.',
+                    'Dear Parent/Guardian, This is to notify you that %s (Card Number: %s) has %s %s on %s.',
                     $userName,
                     $record["enrollid"],
+                    $punchAction,
                     $device['device_name'] ?? 'Device ' . $deviceSerial,
                     $punchTime
                 );
-                
+
                 if (sendEmail($user['email'], $emailMessage, $subject)) {
                     $successfulNotifications++;
                     error_log("Email sent successfully to: " . $user['email']);
@@ -1543,12 +1561,14 @@ function store($records, $deviceSerial, $sts = 0) {
                 // Send SMS notification
                 if (!empty($user['phone_number'])) {
                     $smsMessage = sprintf(
-                        'Attendance Alert: %s (Card: %s) at %s',
+                        '%s Alert: %s (Card: %s) %s at %s',
+                        $punchTypeLabel,
                         $userName,
                         $record["enrollid"],
+                        $punchAction,
                         date("H:i", strtotime($record["time"]))
                     );
-                    
+
                     if (sendSms($smsMessage, $user['phone_number'])) {
                         error_log("SMS sent successfully to: " . $user['phone_number']);
                     } else {
@@ -1624,9 +1644,9 @@ function store($records, $deviceSerial, $sts = 0) {
     return '{"ret":"sendlog","result":true,"cloudtime":"' . date('Y-m-d H:i:s') . '","message":"' . $reason . '","notifications":' . $successfulNotifications . ',"organization_id":' . $organizationId . '}';
 }
 
-function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id = null, $device_id = null, $assigned_by = null) {
+function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id = null, $device_id = null, $assigned_by = null, $user_type = 'student') {
     $pdoConn = getValidConnection();
-    
+
     try {
         // Input validation
         if (empty($punching_code) || empty($name)) {
@@ -1635,6 +1655,11 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
                 "message" => "Punching code and name are required",
                 "user_id" => null
             ];
+        }
+
+        // Validate user_type
+        if (!in_array($user_type, ['staff', 'student'])) {
+            $user_type = 'student'; // Default to student if invalid
         }
         
         // Set default organization if not provided
@@ -1666,7 +1691,7 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
         }
         
         // Check if user exists in this organization
-        $stmt = $pdoConn->prepare("SELECT id, name, email, phone_number, organization_id, status FROM users WHERE punching_code = ? AND organization_id = ?");
+        $stmt = $pdoConn->prepare("SELECT id, name, email, phone_number, user_type, organization_id, status FROM users WHERE punching_code = ? AND organization_id = ?");
         $stmt->execute([$punching_code, $organization_id]);
         $existingUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -1680,17 +1705,22 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
                 $updates[] = "name = ?";
                 $params[] = $name;
             }
-            
+
             if (!empty($email) && $existingUser['email'] !== $email) {
                 $updates[] = "email = ?";
                 $params[] = $email;
             }
-            
+
             if (!empty($phone) && $existingUser['phone_number'] !== $phone) {
                 $updates[] = "phone_number = ?";
                 $params[] = $phone;
             }
-            
+
+            if (!empty($user_type) && $existingUser['user_type'] !== $user_type) {
+                $updates[] = "user_type = ?";
+                $params[] = $user_type;
+            }
+
             // Ensure user is active
             if ($existingUser['status'] !== 'active') {
                 $updates[] = "status = ?";
@@ -1768,11 +1798,11 @@ function getOrCreateUser($punching_code, $name, $phone, $email, $organization_id
 
         // User doesn't exist - create new user
         $stmt = $pdoConn->prepare(
-            "INSERT INTO users (punching_code, name, email, phone_number, organization_id, status, created_at) 
-             VALUES (?, ?, ?, ?, ?, 'active', NOW())"
+            "INSERT INTO users (punching_code, name, email, phone_number, user_type, organization_id, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', NOW())"
         );
-        
-        $stmt->execute([$punching_code, $name, $email, $phone, $organization_id]);
+
+        $stmt->execute([$punching_code, $name, $email, $phone, $user_type, $organization_id]);
         $newUserId = $pdoConn->lastInsertId();
         
         error_log("Created new user: $punching_code in organization $organization_id ($orgName)");
@@ -1885,7 +1915,8 @@ function bulkCreateUsers($users_data, $organization_id = null, $assigned_by = nu
                 $userData['email'] ?? null,
                 $userOrgId,
                 $userData['device_id'] ?? null,  // Optional device assignment for bulk creation
-                $assigned_by
+                $assigned_by,
+                $userData['user_type'] ?? 'student'  // Default to student if not provided
             );
             
             switch ($result['status']) {
@@ -2168,13 +2199,15 @@ function getAllLogs() {
 
 	try {
         $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
-                       u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status,
+                       u.id as user_id, t.organization_id, u.name, u.user_type, o.name as organization_name, o.status as organization_status,
+                       d.device_name, d.serial_number,
                        al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN devices d ON t.device_serial = d.serial_number
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
                 LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
@@ -2200,12 +2233,14 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
         if ($organization_id) {
             $stmt = $pdoConn->prepare("
                 SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
+                       d.device_name, d.serial_number,
                        al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN devices d ON t.device_serial = d.serial_number
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
                 LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
@@ -2217,12 +2252,14 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null) {
         } else {
             $stmt = $pdoConn->prepare("
                 SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
+                       d.device_name, d.serial_number,
                        al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN devices d ON t.device_serial = d.serial_number
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
                 LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
@@ -2254,7 +2291,7 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
     
     try {
         $sql = "
-            SELECT t.*, u.name, u.email, u.phone_number, o.name as organization_name, o.status as organization_status,
+            SELECT t.*, u.name, u.email, u.phone_number, u.user_type, o.name as organization_name, o.status as organization_status,
                    d.device_name, d.serial_number,
                    al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
                    da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
@@ -2651,16 +2688,18 @@ function getDeviceDetails($serial_number) {
 
 function getLogsByDevice($device_serial) {
     $pdoConn = getValidConnection();
-    
+
     try {
         $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
                        u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status,
+                       d.device_name, d.serial_number,
                        al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
                        da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
                 LEFT JOIN organizations o ON t.organization_id = o.id
+                LEFT JOIN devices d ON t.device_serial = d.serial_number
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
                 LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
@@ -3309,7 +3348,7 @@ function getDeviceAssignedUsers($deviceId) {
 
     try {
         $stmt = $pdoConn->prepare("
-            SELECT u.id, u.punching_code, u.name, u.email, u.phone_number, u.status,
+            SELECT u.id, u.punching_code, u.name, u.email, u.phone_number, u.user_type, u.status,
                    uda.assigned_at, a.username as assigned_by_username
             FROM user_device_assignments uda
             INNER JOIN users u ON uda.user_id = u.id
@@ -3412,6 +3451,7 @@ function getOrganizationDeviceAssignments($organizationId) {
                 u.punching_code,
                 u.name as user_name,
                 u.email as user_email,
+                u.user_type,
                 d.serial_number as device_serial,
                 d.device_name,
                 d.device_model,
@@ -3509,7 +3549,7 @@ function parseCSVFile($filePath) {
     }
 
     // Expected headers (order doesn't matter)
-    $expectedHeaders = ['punching_code', 'name', 'email', 'phone', 'organization_id'];
+    $expectedHeaders = ['punching_code', 'name', 'email', 'phone', 'organization_id', 'user_type'];
     $headerMap = [];
 
     // Map headers to their positions
@@ -3549,7 +3589,8 @@ function parseCSVFile($filePath) {
             'name' => isset($headerMap['name']) ? trim($data[$headerMap['name']] ?? '') : '',
             'email' => isset($headerMap['email']) ? trim($data[$headerMap['email']] ?? '') : '',
             'phone' => isset($headerMap['phone']) ? trim($data[$headerMap['phone']] ?? '') : '',
-            'organization_id' => isset($headerMap['organization_id']) ? trim($data[$headerMap['organization_id']] ?? '') : null
+            'organization_id' => isset($headerMap['organization_id']) ? trim($data[$headerMap['organization_id']] ?? '') : null,
+            'user_type' => isset($headerMap['user_type']) ? trim($data[$headerMap['user_type']] ?? '') : 'student'
         ];
 
         // Validate row data
@@ -3574,6 +3615,11 @@ function parseCSVFile($filePath) {
         // Validate organization_id if provided
         if (!empty($rowData['organization_id']) && !is_numeric($rowData['organization_id'])) {
             $errors[] = 'Organization ID must be numeric';
+        }
+
+        // Validate user_type if provided
+        if (!empty($rowData['user_type']) && !in_array($rowData['user_type'], ['staff', 'student'])) {
+            $errors[] = 'User type must be either "staff" or "student"';
         }
 
         if (!empty($errors)) {
@@ -4121,7 +4167,7 @@ function getOrganizationAttendance($organizationId, $dateFrom = null, $dateTo = 
 
     try {
         $stmt = $pdoConn->prepare("
-            SELECT da.*, u.name as user_name, u.email, u.punching_code
+            SELECT da.*, u.name as user_name, u.email, u.punching_code, u.user_type
             FROM daily_attendance da
             INNER JOIN users u ON da.user_id = u.id
             WHERE da.organization_id = ? AND da.attendance_date BETWEEN ? AND ?
@@ -4168,7 +4214,7 @@ function getUserAttendanceReport($userId, $dateFrom = null, $dateTo = null) {
 
     try {
         $stmt = $pdoConn->prepare("
-            SELECT da.*, u.name as user_name, u.email, u.punching_code
+            SELECT da.*, u.name as user_name, u.email, u.punching_code, u.user_type
             FROM daily_attendance da
             INNER JOIN users u ON da.user_id = u.id
             WHERE da.user_id = ? AND da.attendance_date BETWEEN ? AND ?
@@ -4229,6 +4275,7 @@ function getTodayAttendanceStatus($organizationId) {
                 u.id as user_id,
                 u.punching_code,
                 u.name as user_name,
+                u.user_type,
                 da.punch_in_time,
                 da.punch_out_time,
                 da.status,
@@ -4291,6 +4338,7 @@ function getAbsenceReport($organizationId, $dateFrom = null, $dateTo = null) {
                 u.name as user_name,
                 u.email,
                 u.punching_code,
+                u.user_type,
                 a.username as excused_by_name
             FROM absence_records ar
             INNER JOIN users u ON ar.user_id = u.id
