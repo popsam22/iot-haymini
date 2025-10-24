@@ -2480,8 +2480,23 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
 function exportLogsToExcel() {
     $pdoConn = getValidConnection();
 
-    // Step 1: Fetch data from the database
-    $stmt = $pdoConn->query("SELECT * FROM tblt_timesheet");
+    // Step 1: Fetch data from the database with all fields (same as getAllLogs)
+    $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
+                   u.id as user_id, t.organization_id, u.name, u.user_type, o.name as organization_name, o.status as organization_status,
+                   d.device_name, d.serial_number,
+                   al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
+                   da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                   da.late_minutes, da.early_out_minutes, da.overtime_hours
+            FROM tblt_timesheet t
+            LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
+            LEFT JOIN organizations o ON t.organization_id = o.id
+            LEFT JOIN devices d ON t.device_serial = d.serial_number
+            LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
+                AND t.date = al.punch_date AND t.time = al.punch_time
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
+            ORDER BY t.date DESC, t.time DESC';
+
+    $stmt = $pdoConn->query($sql);
     $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Step 2: Initialize Spreadsheet
@@ -2490,17 +2505,23 @@ function exportLogsToExcel() {
 
     // Step 3: Populate spreadsheet headers
     $sheet->setCellValue('A1', 'Punching Code');
-    $sheet->setCellValue('B1', 'Date');
-    $sheet->setCellValue('C1', 'Time');
-    $sheet->setCellValue('D1', 'Tid');
+    $sheet->setCellValue('B1', 'Name');
+    $sheet->setCellValue('C1', 'Date');
+    $sheet->setCellValue('D1', 'Punch In Time');
+    $sheet->setCellValue('E1', 'Punch Out Time');
+    $sheet->setCellValue('F1', 'Device Name');
+    $sheet->setCellValue('G1', 'Status');
 
     // Step 4: Populate spreadsheet data
     $row = 2;
     foreach ($logs as $log) {
-        $sheet->setCellValue('A' . $row, $log['punchingcode']);
-        $sheet->setCellValue('B' . $row, $log['date']);
-        $sheet->setCellValue('C' . $row, $log['time']);
-        $sheet->setCellValue('D' . $row, $log['Tid']);
+        $sheet->setCellValue('A' . $row, $log['punchingcode'] ?? '');
+        $sheet->setCellValue('B' . $row, $log['name'] ?? '');
+        $sheet->setCellValue('C' . $row, $log['date'] ?? '');
+        $sheet->setCellValue('D' . $row, $log['punch_in_time'] ?? '');
+        $sheet->setCellValue('E' . $row, $log['punch_out_time'] ?? '');
+        $sheet->setCellValue('F' . $row, $log['device_name'] ?? '');
+        $sheet->setCellValue('G' . $row, $log['daily_status'] ?? '');
         $row++;
     }
 
