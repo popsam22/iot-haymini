@@ -9,7 +9,7 @@
   $dotenv->load();
 
   function sendEmail($to, $message, $subject){
-    date_default_timezone_set('Africa/Lagos');
+    // date_default_timezone_set('Africa/Lagos');
 
     $mail = new PHPMailer(true);
     try {
