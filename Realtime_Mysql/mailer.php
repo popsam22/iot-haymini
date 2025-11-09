@@ -7,6 +7,7 @@
 
   $dotenv = Dotenv::createImmutable(__DIR__. '/../');
   $dotenv->load();
+  date_default_timezone_set('Africa/Lagos');
 
   function sendEmail($to, $message, $subject){
     // date_default_timezone_set('Africa/Lagos');
