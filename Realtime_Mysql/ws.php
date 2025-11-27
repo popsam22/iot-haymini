@@ -626,20 +626,21 @@ switch ($requestMethod) {
             
         } elseif (preg_match('/\/api\/devices\/([^\/]+)$/', $path, $matches)) {
             $serialNumber = $matches[1];
-            
-            if (!$jsonInput || empty($jsonInput['status'])) {
+
+            if (!$jsonInput || empty($jsonInput)) {
                 http_response_code(400);
-                echo json_encode(['error' => 'Missing required field: status']);
+                echo json_encode(['error' => 'No fields provided to update']);
                 break;
             }
-            
-            if (!in_array($jsonInput['status'], ['active', 'inactive', 'maintenance'])) {
+
+            // Validate status if provided
+            if (isset($jsonInput['status']) && !in_array($jsonInput['status'], ['active', 'inactive', 'maintenance'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Invalid status. Must be: active, inactive, or maintenance']);
                 break;
             }
-            
-            echo json_encode(updateDeviceStatus($serialNumber, $jsonInput['status']));
+
+            echo json_encode(updateDeviceStatus($serialNumber, $jsonInput));
             
         } elseif (preg_match('/\/api\/devices\/([^\/]+)\/organization$/', $path, $matches)) {
             requireAuth();
@@ -2137,46 +2138,71 @@ function getDevicesByOrganization($organization_id) {
     }
 }
 
-function updateDeviceStatus($serial_number, $status) {
+function updateDeviceStatus($serial_number, $updateData) {
     $pdoConn = getValidConnection();
-    
+
     try {
         // Check if device exists
-        $stmt = $pdoConn->prepare("SELECT id, status FROM devices WHERE serial_number = ?");
+        $stmt = $pdoConn->prepare("SELECT * FROM devices WHERE serial_number = ?");
         $stmt->execute([$serial_number]);
         $device = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$device) {
             return [
                 "status" => "error",
                 "message" => "Device not found"
             ];
         }
-        
-        // Update device status
-        $stmt = $pdoConn->prepare("
-            UPDATE devices 
-            SET status = ?, updated_at = CURRENT_TIMESTAMP 
-            WHERE serial_number = ?
-        ");
-        $stmt->execute([$status, $serial_number]);
-        
-        error_log("Updated device $serial_number status from {$device['status']} to $status");
-        
+
+        // Define allowed fields for update
+        $allowedFields = ['device_name', 'device_model', 'ip_address', 'status', 'organization_id'];
+        $updateFields = [];
+        $updateValues = [];
+        $previousValues = [];
+
+        // Build dynamic update query
+        foreach ($updateData as $field => $value) {
+            if (in_array($field, $allowedFields)) {
+                $updateFields[] = "$field = ?";
+                $updateValues[] = $value;
+                $previousValues[$field] = $device[$field];
+            }
+        }
+
+        if (empty($updateFields)) {
+            return [
+                "status" => "error",
+                "message" => "No valid fields provided to update. Allowed fields: " . implode(', ', $allowedFields)
+            ];
+        }
+
+        // Add updated_at timestamp
+        $updateFields[] = "updated_at = CURRENT_TIMESTAMP";
+
+        // Execute update
+        $sql = "UPDATE devices SET " . implode(', ', $updateFields) . " WHERE serial_number = ?";
+        $updateValues[] = $serial_number;
+
+        $stmt = $pdoConn->prepare($sql);
+        $stmt->execute($updateValues);
+
+        error_log("Updated device $serial_number fields: " . implode(', ', array_keys($previousValues)));
+
         return [
             "status" => "success",
-            "message" => "Device status updated successfully",
+            "message" => "Device updated successfully",
             "device_id" => $device['id'],
             "serial_number" => $serial_number,
-            "previous_status" => $device['status'],
-            "new_status" => $status
+            "updated_fields" => array_keys($previousValues),
+            "previous_values" => $previousValues,
+            "new_values" => array_intersect_key($updateData, array_flip($allowedFields))
         ];
-        
+
     } catch (PDOException $e) {
-        error_log("Device status update error: " . $e->getMessage());
+        error_log("Device update error: " . $e->getMessage());
         return [
             "status" => "error",
-            "message" => "Database error updating device status"
+            "message" => "Database error updating device"
         ];
     }
 }
