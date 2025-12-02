@@ -261,8 +261,8 @@ switch ($requestMethod) {
             $dateTo = $queryParams['date_to'] ?? null;
             $userName = $queryParams['user_name'] ?? null;
             $limit = isset($queryParams['limit']) ? (int)$queryParams['limit'] : 10;
-            $offset = isset($queryParams['offset']) ? (int)$queryParams['offset'] : 0;
-            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo, $userName, $limit, $offset));
+            $page = isset($queryParams['page']) ? max(1, (int)$queryParams['page']) : 1;
+            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo, $userName, $limit, $page));
 
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/device-assignments$/', $path, $matches)) {
             $organizationId = (int)$matches[1];
@@ -2434,10 +2434,14 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null, $date_fro
     }
 }
 
-function getLogsByOrganization($organization_id, $date_from = null, $date_to = null, $user_name = null, $limit = 10, $offset = 0) {
+function getLogsByOrganization($organization_id, $date_from = null, $date_to = null, $user_name = null, $limit = 10, $page = 1) {
     $pdoConn = getValidConnection();
 
     try {
+        // Calculate offset from page number
+        $page = max(1, (int)$page); // Ensure page is at least 1
+        $offset = ($page - 1) * $limit;
+
         // Build the WHERE clause for both count and data queries
         $whereClause = "WHERE t.organization_id = ?";
         $params = [$organization_id];
@@ -2473,6 +2477,9 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
         $countStmt = $pdoConn->prepare($countSql);
         $countStmt->execute($countParams);
         $totalCount = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+        // Calculate total pages
+        $totalPages = (int)ceil($totalCount / $limit);
 
         // Get paginated data
         $sql = "
@@ -2513,11 +2520,13 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
                 "user_name" => $user_name
             ],
             "pagination" => [
+                "page" => $page,
                 "limit" => (int)$limit,
-                "offset" => (int)$offset,
                 "total_count" => (int)$totalCount,
+                "total_pages" => $totalPages,
                 "current_count" => count($logs),
-                "has_more" => ($offset + count($logs)) < $totalCount
+                "has_next" => $page < $totalPages,
+                "has_previous" => $page > 1
             ],
             "logs" => $logs
         ];
@@ -2525,7 +2534,7 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
     } catch (PDOException $e) {
         error_log("Get logs by organization error: " . $e->getMessage());
         error_log("Organization ID: " . $organization_id);
-        error_log("Filters: " . json_encode(['date_from' => $date_from, 'date_to' => $date_to, 'user_name' => $user_name, 'limit' => $limit, 'offset' => $offset]));
+        error_log("Filters: " . json_encode(['date_from' => $date_from, 'date_to' => $date_to, 'user_name' => $user_name, 'limit' => $limit, 'page' => $page]));
         return [
             "status" => "error",
             "message" => "Database error retrieving logs"
