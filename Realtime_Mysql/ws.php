@@ -260,7 +260,9 @@ switch ($requestMethod) {
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
             $userName = $queryParams['user_name'] ?? null;
-            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo, $userName));
+            $limit = isset($queryParams['limit']) ? (int)$queryParams['limit'] : 10;
+            $offset = isset($queryParams['offset']) ? (int)$queryParams['offset'] : 0;
+            echo json_encode(getLogsByOrganization($organizationId, $dateFrom, $dateTo, $userName, $limit, $offset));
 
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/device-assignments$/', $path, $matches)) {
             $organizationId = (int)$matches[1];
@@ -2432,10 +2434,47 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null, $date_fro
     }
 }
 
-function getLogsByOrganization($organization_id, $date_from = null, $date_to = null, $user_name = null) {
+function getLogsByOrganization($organization_id, $date_from = null, $date_to = null, $user_name = null, $limit = 10, $offset = 0) {
     $pdoConn = getValidConnection();
 
     try {
+        // Build the WHERE clause for both count and data queries
+        $whereClause = "WHERE t.organization_id = ?";
+        $params = [$organization_id];
+        $countParams = [$organization_id];
+
+        if ($date_from) {
+            $whereClause .= " AND t.date >= ?";
+            $params[] = $date_from;
+            $countParams[] = $date_from;
+        }
+
+        if ($date_to) {
+            $whereClause .= " AND t.date <= ?";
+            $params[] = $date_to;
+            $countParams[] = $date_to;
+        }
+
+        if ($user_name) {
+            $whereClause .= " AND u.name LIKE ?";
+            $searchParam = '%' . $user_name . '%';
+            $params[] = $searchParam;
+            $countParams[] = $searchParam;
+        }
+
+        // Get total count for pagination
+        $countSql = "
+            SELECT COUNT(*) as total
+            FROM tblt_timesheet t
+            LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
+            $whereClause
+        ";
+
+        $countStmt = $pdoConn->prepare($countSql);
+        $countStmt->execute($countParams);
+        $totalCount = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+        // Get paginated data
         $sql = "
             SELECT t.*, u.name, u.email, u.phone_number, u.user_type, o.name as organization_name, o.status as organization_status,
                    d.device_name, d.serial_number,
@@ -2449,37 +2488,23 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
             LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                 AND t.date = al.punch_date AND t.time = al.punch_time
             LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
-            WHERE t.organization_id = ?
+            $whereClause
+            ORDER BY t.date DESC, t.time DESC
+            LIMIT ? OFFSET ?
         ";
 
-        $params = [$organization_id];
+        $params[] = (int)$limit;
+        $params[] = (int)$offset;
 
-        if ($date_from) {
-            $sql .= " AND t.date >= ?";
-            $params[] = $date_from;
-        }
-
-        if ($date_to) {
-            $sql .= " AND t.date <= ?";
-            $params[] = $date_to;
-        }
-
-        if ($user_name) {
-            $sql .= " AND u.name LIKE ?";
-            $params[] = '%' . $user_name . '%';
-        }
-
-        $sql .= " ORDER BY t.date DESC, t.time DESC";
-        
         $stmt = $pdoConn->prepare($sql);
         $stmt->execute($params);
         $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         // Get organization details
         $orgStmt = $pdoConn->prepare("SELECT name FROM organizations WHERE id = ?");
         $orgStmt->execute([$organization_id]);
         $organization = $orgStmt->fetch(PDO::FETCH_ASSOC);
-        
+
         return [
             "status" => "success",
             "message" => "Logs retrieved successfully",
@@ -2490,10 +2515,16 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
                 "date_to" => $date_to,
                 "user_name" => $user_name
             ],
-            "total_count" => count($logs),
+            "pagination" => [
+                "limit" => (int)$limit,
+                "offset" => (int)$offset,
+                "total_count" => (int)$totalCount,
+                "current_count" => count($logs),
+                "has_more" => ($offset + count($logs)) < $totalCount
+            ],
             "logs" => $logs
         ];
-        
+
     } catch (PDOException $e) {
         error_log("Get logs by organization error: " . $e->getMessage());
         return [
