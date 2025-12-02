@@ -2490,11 +2490,8 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
             LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
             $whereClause
             ORDER BY t.date DESC, t.time DESC
-            LIMIT ? OFFSET ?
+            LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
         ";
-
-        $params[] = (int)$limit;
-        $params[] = (int)$offset;
 
         $stmt = $pdoConn->prepare($sql);
         $stmt->execute($params);
@@ -2527,6 +2524,8 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
 
     } catch (PDOException $e) {
         error_log("Get logs by organization error: " . $e->getMessage());
+        error_log("Organization ID: " . $organization_id);
+        error_log("Filters: " . json_encode(['date_from' => $date_from, 'date_to' => $date_to, 'user_name' => $user_name, 'limit' => $limit, 'offset' => $offset]));
         return [
             "status" => "error",
             "message" => "Database error retrieving logs"
