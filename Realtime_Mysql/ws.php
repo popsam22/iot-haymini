@@ -213,9 +213,9 @@ $query = parse_url($requestUri, PHP_URL_QUERY);
 // Parse query parameters
 parse_str($query ?? '', $queryParams);
 
-// Get JSON input for POST/PUT requests
+// Get JSON input for POST/PUT/DELETE requests
 $jsonInput = null;
-if (in_array($requestMethod, ['POST', 'PUT', 'PATCH'])) {
+if (in_array($requestMethod, ['POST', 'PUT', 'PATCH', 'DELETE'])) {
     $rawInput = file_get_contents('php://input');
     if (!empty($rawInput)) {
         $jsonInput = json_decode($rawInput, true);
