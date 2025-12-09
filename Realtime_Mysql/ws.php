@@ -385,7 +385,8 @@ switch ($requestMethod) {
                         'GET /api/users/{punching_code}' => 'Get user logs',
                         'GET /api/users/{user_id}/attendance-report' => 'Get user attendance report',
                         'PUT /api/users/{punching_code}/activate' => 'Activate user',
-                        'PUT /api/users/{punching_code}/deactivate' => 'Deactivate user'
+                        'PUT /api/users/{punching_code}/deactivate' => 'Deactivate user',
+                        'DELETE /api/users/{punching_code}' => 'Delete user from organization (cascade deletes all related data)'
                     ],
                     'devices' => [
                         'POST /api/devices' => 'Register device',
@@ -694,6 +695,13 @@ switch ($requestMethod) {
             $userId = (int)$matches[1];
             $deviceId = (int)$matches[2];
             echo json_encode(removeUserFromDevice($userId, $deviceId, $user['admin_id']));
+
+        } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
+            $user = requireAuth();
+            $punchingCode = $matches[1];
+            // Use organization_id from request body, or default to authenticated user's org
+            $orgId = $jsonInput['organization_id'] ?? $user['organization_id'];
+            echo json_encode(deleteUser($punchingCode, $orgId));
 
         } else {
             http_response_code(404);
@@ -1910,6 +1918,78 @@ function deactivateUser($punching_code, $organization_id) {
     } catch (PDOException $e) {
         error_log("Error deactivating user: " . $e->getMessage());
         return ["status" => "error", "message" => "Database error"];
+    }
+}
+
+function deleteUser($punching_code, $organization_id) {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Start transaction to ensure all deletions succeed or roll back
+        $pdoConn->beginTransaction();
+
+        // Get user ID first
+        $stmt = $pdoConn->prepare("SELECT id, name FROM users WHERE punching_code = ? AND organization_id = ?");
+        $stmt->execute([$punching_code, $organization_id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            return ["status" => "error", "message" => "User not found in the specified organization"];
+        }
+
+        $userId = $user['id'];
+        $userName = $user['name'];
+
+        // Delete user-device assignments
+        $stmt = $pdoConn->prepare("DELETE FROM user_device_assignments WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $deviceAssignmentsDeleted = $stmt->rowCount();
+
+        // Delete attendance logs for this user
+        $stmt = $pdoConn->prepare("DELETE FROM attendance_logs WHERE punching_code = ?");
+        $stmt->execute([$punching_code]);
+        $attendanceLogsDeleted = $stmt->rowCount();
+
+        // Delete daily attendance records
+        $stmt = $pdoConn->prepare("DELETE FROM daily_attendance WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $dailyAttendanceDeleted = $stmt->rowCount();
+
+        // Delete absence records
+        $stmt = $pdoConn->prepare("DELETE FROM absence_records WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $absenceRecordsDeleted = $stmt->rowCount();
+
+        // Finally, delete the user
+        $stmt = $pdoConn->prepare("DELETE FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+
+        // Commit transaction
+        $pdoConn->commit();
+
+        error_log("Deleted user: $punching_code (ID: $userId, Name: $userName) from organization: $organization_id");
+        error_log("Cascade deletions - Device assignments: $deviceAssignmentsDeleted, Attendance logs: $attendanceLogsDeleted, Daily attendance: $dailyAttendanceDeleted, Absence records: $absenceRecordsDeleted");
+
+        return [
+            "status" => "success",
+            "message" => "User deleted successfully",
+            "details" => [
+                "user_id" => $userId,
+                "punching_code" => $punching_code,
+                "name" => $userName,
+                "device_assignments_deleted" => $deviceAssignmentsDeleted,
+                "attendance_logs_deleted" => $attendanceLogsDeleted,
+                "daily_attendance_deleted" => $dailyAttendanceDeleted,
+                "absence_records_deleted" => $absenceRecordsDeleted
+            ]
+        ];
+    } catch (PDOException $e) {
+        // Rollback on error
+        if ($pdoConn->inTransaction()) {
+            $pdoConn->rollBack();
+        }
+        error_log("Error deleting user: " . $e->getMessage());
+        return ["status" => "error", "message" => "Database error: " . $e->getMessage()];
     }
 }
 
