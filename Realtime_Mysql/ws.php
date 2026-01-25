@@ -3068,7 +3068,7 @@ function loginAdmin($email, $password) {
         }
 
         // Check if organization is active (for non-super-admin users)
-        if ($admin['role'] !== 'super-admin' && $admin['organization_status'] !== 'active') {
+        if ($admin['role'] !== 'super_admin' && $admin['organization_status'] !== 'active') {
             return [
                 'status' => 'error',
                 'message' => 'Organization access has been deactivated. Please contact support.'
