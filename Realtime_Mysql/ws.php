@@ -256,6 +256,7 @@ switch ($requestMethod) {
             echo json_encode(getDevicesByOrganization($organizationId));
             
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/logs$/', $path, $matches)) {
+            $user = requireOrgAccess((int)$matches[1]);
             $organizationId = (int)$matches[1];
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
@@ -270,8 +271,17 @@ switch ($requestMethod) {
 
 
         } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
+            $user = requireAuth();
             $punchingCode = $matches[1];
-            $organizationId = $queryParams['organization_id'] ?? null;
+            $organizationId = $queryParams['organization_id'] ?? $user['organization_id'];
+
+            // Ensure non-super admins can only access their organization
+            if ($user['role'] !== 'super_admin' && $organizationId != $user['organization_id']) {
+                http_response_code(403);
+                echo json_encode(['error' => 'Access denied to this organization']);
+                break;
+            }
+
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
             echo getLogsByPunchingCode($punchingCode, $organizationId, $dateFrom, $dateTo);
@@ -283,13 +293,21 @@ switch ($requestMethod) {
             
 
         } elseif (preg_match('/\/api\/logs$/', $path)) {
+            $user = requireAuth();
             $dateFrom = $queryParams['date_from'] ?? null;
             $dateTo = $queryParams['date_to'] ?? null;
             $userName = $queryParams['user_name'] ?? null;
-            echo getAllLogs($dateFrom, $dateTo, $userName);
+
+            // Super admin sees all logs, regular admin sees only their organization logs
+            if ($user['role'] === 'super_admin') {
+                echo getAllLogs($dateFrom, $dateTo, $userName);
+            } else {
+                echo json_encode(getLogsByOrganization($user['organization_id'], $dateFrom, $dateTo, $userName, 1000, 1));
+            }
             
         } elseif (preg_match('/\/api\/logs\/export$/', $path)) {
-             exportLogsToExcel();
+            $user = requireAuth();
+            exportLogsToExcel($user);
             
         } elseif (preg_match('/\/api\/logs\/device\/([^\/]+)$/', $path, $matches)) {
             requireAuth();
@@ -535,14 +553,15 @@ switch ($requestMethod) {
             echo json_encode(exitImpersonation());
 
         } elseif (preg_match('/\/api\/users\/(\d+)\/devices\/(\d+)\/assign$/', $path, $matches)) {
-            requireAuth();
             $user = requireAuth();
             $userId = (int)$matches[1];
             $deviceId = (int)$matches[2];
-            echo json_encode(assignUserToDevice($userId, $deviceId, $user['admin_id']));
+
+            // Verify admin has access to assign users in this organization
+            $result = assignUserToDevice($userId, $deviceId, $user['admin_id'], $user['organization_id'], $user['role']);
+            echo json_encode($result);
 
         } elseif (preg_match('/\/api\/devices\/(\d+)\/users\/bulk-assign$/', $path, $matches)) {
-            requireAuth();
             $user = requireAuth();
             $deviceId = (int)$matches[1];
 
@@ -552,7 +571,7 @@ switch ($requestMethod) {
                 break;
             }
 
-            echo json_encode(bulkAssignUsersToDevice($deviceId, $jsonInput['user_ids'], $user['admin_id']));
+            echo json_encode(bulkAssignUsersToDevice($deviceId, $jsonInput['user_ids'], $user['admin_id'], $user['organization_id'], $user['role']));
 
         } elseif (preg_match('/\/api\/users\/upload-csv$/', $path)) {
             requireAuth();
@@ -690,11 +709,10 @@ switch ($requestMethod) {
 
     case 'DELETE':
         if (preg_match('/\/api\/users\/(\d+)\/devices\/(\d+)\/assign$/', $path, $matches)) {
-            requireAuth();
             $user = requireAuth();
             $userId = (int)$matches[1];
             $deviceId = (int)$matches[2];
-            echo json_encode(removeUserFromDevice($userId, $deviceId, $user['admin_id']));
+            echo json_encode(removeUserFromDevice($userId, $deviceId, $user['admin_id'], $user['organization_id'], $user['role']));
 
         } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
             $user = requireAuth();
@@ -1434,29 +1452,25 @@ function store($records, $deviceSerial, $sts = 0) {
 
         // Step 2: Validate user belongs to same organization as device
         try {
+            // CRITICAL: Lookup user scoped by BOTH punching_code AND organization_id
+            // This ensures we get the correct user when same punching code exists in multiple organizations
             $stmt = $pdoConn->prepare("
                 SELECT u.id, u.name, u.email, u.phone_number, u.organization_id, u.status, o.status as organization_status
                 FROM users u
                 LEFT JOIN organizations o ON u.organization_id = o.id
-                WHERE u.punching_code = ?
+                WHERE u.punching_code = ? AND u.organization_id = ?
             ");
-            $stmt->execute([$record["enrollid"]]);
+            $stmt->execute([$record["enrollid"], $organizationId]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
-            
+
             if (!$user) {
-                error_log("User not found: " . $record["enrollid"]);
+                error_log("User not found in organization - Punching Code: {$record['enrollid']}, Organization: $organizationId, Device: $deviceSerial");
                 $invalidRecords++;
                 continue;
             }
-            
+
             if ($user['status'] !== 'active') {
-                error_log("Inactive user attempted access: " . $record["enrollid"]);
-                $unauthorizedAccess++;
-                continue;
-            }
-            
-            if ($user['organization_id'] != $organizationId) {
-                error_log("Cross-organization access denied - User org: {$user['organization_id']}, Device org: $organizationId, User: {$record['enrollid']}, Device: $deviceSerial");
+                error_log("Inactive user attempted access: {$record['enrollid']} in organization $organizationId");
                 $unauthorizedAccess++;
                 continue;
             }
@@ -1556,30 +1570,61 @@ function store($records, $deviceSerial, $sts = 0) {
 
                 // Determine punch type and create appropriate message
                 $punchType = $punchResult['punch_type'] ?? 'unknown';
-                $punchTypeLabel = '';
-                $punchAction = '';
-
-                if ($punchType === 'in') {
-                    $punchTypeLabel = 'PUNCH IN';
-                    $punchAction = 'arrived at';
-                } elseif ($punchType === 'out') {
-                    $punchTypeLabel = 'PUNCH OUT';
-                    $punchAction = 'left';
-                } else {
-                    $punchTypeLabel = 'ATTENDANCE';
-                    $punchAction = 'was recorded at';
-                }
+                $organizationName = $user['organization_name'] ?? 'School';
+                $checkTime = date("g:i A", strtotime($record["time"]));
 
                 // Send email notification
-                $subject = sprintf('Attendance Alert - %s', $punchTypeLabel);
-                $emailMessage = sprintf(
-                    'Dear Parent/Guardian, This is to notify you that %s (Card Number: %s) has %s %s on %s.',
-                    $userName,
-                    $record["enrollid"],
-                    $punchAction,
-                    $device['device_name'] ?? 'Device ' . $deviceSerial,
-                    $punchTime
-                );
+                if ($punchType === 'in') {
+                    // Punch In Email Template
+                    $subject = sprintf('School Arrival Notification: %s', $organizationName);
+                    $emailMessage = sprintf(
+                        "Dear Parent/Guardian,\n\n" .
+                        "We are writing to let you know that %s has successfully checked into school for the day. Please find the arrival details below:\n\n" .
+                        "Arrival Details:\n" .
+                        "Student Name: %s\n" .
+                        "Student ID: %s\n" .
+                        "Check-in Time: %s\n" .
+                        "School: %s\n\n" .
+                        "No further action is required. We look forward to a great day of learning!\n\n" .
+                        "Best regards,\n" .
+                        "%s Administration",
+                        $userName,
+                        $userName,
+                        $record["enrollid"],
+                        $checkTime,
+                        $organizationName,
+                        $organizationName
+                    );
+                } elseif ($punchType === 'out') {
+                    // Punch Out Email Template
+                    $subject = sprintf('School Departure Notification: %s', $organizationName);
+                    $emailMessage = sprintf(
+                        "Dear Parent/Guardian,\n\n" .
+                        "This is an automated notification to inform you that %s has checked out and has now left the school premises.\n\n" .
+                        "Departure Details:\n" .
+                        "Student Name: %s\n" .
+                        "Check-out Time: %s\n" .
+                        "School: %s\n\n" .
+                        "If you were not expecting your child to leave at this time, please contact the school office immediately.\n\n" .
+                        "Safe travels,\n" .
+                        "%s Administration",
+                        $userName,
+                        $userName,
+                        $checkTime,
+                        $organizationName,
+                        $organizationName
+                    );
+                } else {
+                    // Fallback for unknown punch types
+                    $subject = sprintf('Attendance Alert: %s', $organizationName);
+                    $emailMessage = sprintf(
+                        'Dear Parent/Guardian, This is to notify you that %s (Student ID: %s) attendance was recorded at %s on %s.',
+                        $userName,
+                        $record["enrollid"],
+                        $device['device_name'] ?? 'Device ' . $deviceSerial,
+                        $punchTime
+                    );
+                }
 
                 if (sendEmail($user['email'], $emailMessage, $subject)) {
                     $successfulNotifications++;
@@ -1590,14 +1635,36 @@ function store($records, $deviceSerial, $sts = 0) {
 
                 // Send SMS notification
                 if (!empty($user['phone_number'])) {
-                    $smsMessage = sprintf(
-                        '%s Alert: %s (Card: %s) %s at %s',
-                        $punchTypeLabel,
-                        $userName,
-                        $record["enrollid"],
-                        $punchAction,
-                        date("H:i", strtotime($record["time"]))
-                    );
+                    if ($punchType === 'in') {
+                        // Punch In SMS Template
+                        $smsMessage = sprintf(
+                            '%s Alert: %s (ID: %s) has arrived safely at %s. Time: %s. Have a great day!',
+                            $organizationName,
+                            $userName,
+                            $record["enrollid"],
+                            $organizationName,
+                            $checkTime
+                        );
+                    } elseif ($punchType === 'out') {
+                        // Punch Out SMS Template
+                        $smsMessage = sprintf(
+                            '%s Alert: %s (ID: %s) checked out from %s at %s. Please contact the School if this was unexpected.',
+                            $organizationName,
+                            $userName,
+                            $record["enrollid"],
+                            $organizationName,
+                            $checkTime
+                        );
+                    } else {
+                        // Fallback SMS for unknown types
+                        $smsMessage = sprintf(
+                            '%s Alert: %s (ID: %s) attendance recorded at %s',
+                            $organizationName,
+                            $userName,
+                            $record["enrollid"],
+                            date("H:i", strtotime($record["time"]))
+                        );
+                    }
 
                     if (sendSms($smsMessage, $user['phone_number'])) {
                         error_log("SMS sent successfully to: " . $user['phone_number']);
@@ -2622,10 +2689,10 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
     }
 }
 
-function exportLogsToExcel() {
+function exportLogsToExcel($user = null) {
     $pdoConn = getValidConnection();
 
-    // Step 1: Fetch data from the database with all fields (same as getAllLogs)
+    // Step 1: Fetch data from the database with all fields
     $sql = 'SELECT t.timesheetid, t.punchingcode, t.date, t.time, t.Tid,
                    u.id as user_id, t.organization_id, u.name, u.user_type, o.name as organization_name, o.status as organization_status,
                    d.device_name, d.serial_number,
@@ -2638,8 +2705,14 @@ function exportLogsToExcel() {
             LEFT JOIN devices d ON t.device_serial = d.serial_number
             LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                 AND t.date = al.punch_date AND t.time = al.punch_time
-            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
-            ORDER BY t.date DESC, t.time DESC';
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date';
+
+    // Filter by organization for non-super admins
+    if ($user && $user['role'] !== 'super_admin' && !empty($user['organization_id'])) {
+        $sql .= ' WHERE t.organization_id = ' . (int)$user['organization_id'];
+    }
+
+    $sql .= ' ORDER BY t.date DESC, t.time DESC';
 
     $stmt = $pdoConn->query($sql);
     $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -3505,7 +3578,7 @@ function createDefaultSuperAdmin() {
 // USER-DEVICE ASSIGNMENT FUNCTIONS
 // ===============================
 
-function assignUserToDevice($userId, $deviceId, $assignedBy) {
+function assignUserToDevice($userId, $deviceId, $assignedBy, $adminOrgId = null, $adminRole = null) {
     $pdoConn = getValidConnection();
 
     try {
@@ -3539,6 +3612,16 @@ function assignUserToDevice($userId, $deviceId, $assignedBy) {
                 'status' => 'error',
                 'message' => 'User and device must belong to the same organization'
             ];
+        }
+
+        // Verify admin has permission to assign users in this organization
+        if ($adminOrgId !== null && $adminRole !== null) {
+            if ($adminRole !== 'super_admin' && $adminOrgId != $user['organization_id']) {
+                return [
+                    'status' => 'error',
+                    'message' => 'Access denied: You do not have permission to assign users in this organization'
+                ];
+            }
         }
 
         // Check if assignment already exists
@@ -3590,12 +3673,19 @@ function assignUserToDevice($userId, $deviceId, $assignedBy) {
     }
 }
 
-function removeUserFromDevice($userId, $deviceId, $removedBy) {
+function removeUserFromDevice($userId, $deviceId, $removedBy, $adminOrgId = null, $adminRole = null) {
     $pdoConn = getValidConnection();
 
     try {
-        // Check if assignment exists and is active
-        $stmt = $pdoConn->prepare("SELECT id FROM user_device_assignments WHERE user_id = ? AND device_id = ? AND status = 'active'");
+        // Get user and device information to verify organization access
+        $stmt = $pdoConn->prepare("
+            SELECT uda.id, u.organization_id as user_org_id, d.organization_id as device_org_id,
+                   u.punching_code, u.name as user_name, d.serial_number, d.device_name
+            FROM user_device_assignments uda
+            INNER JOIN users u ON uda.user_id = u.id
+            INNER JOIN devices d ON uda.device_id = d.id
+            WHERE uda.user_id = ? AND uda.device_id = ? AND uda.status = 'active'
+        ");
         $stmt->execute([$userId, $deviceId]);
         $assignment = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -3606,15 +3696,29 @@ function removeUserFromDevice($userId, $deviceId, $removedBy) {
             ];
         }
 
+        // Verify admin has permission to remove users from this organization
+        if ($adminOrgId !== null && $adminRole !== null) {
+            if ($adminRole !== 'super_admin' && $adminOrgId != $assignment['user_org_id']) {
+                return [
+                    'status' => 'error',
+                    'message' => 'Access denied: You do not have permission to remove users from this organization'
+                ];
+            }
+        }
+
         // Deactivate assignment
         $stmt = $pdoConn->prepare("UPDATE user_device_assignments SET status = 'inactive', assigned_by = ?, assigned_at = NOW() WHERE id = ?");
         $stmt->execute([$removedBy, $assignment['id']]);
 
-        error_log("Removed user-device assignment: Assignment ID {$assignment['id']}");
+        error_log("Removed user-device assignment: User {$assignment['punching_code']} from Device {$assignment['serial_number']}");
 
         return [
             'status' => 'success',
-            'message' => 'User removed from device successfully'
+            'message' => 'User removed from device successfully',
+            'details' => [
+                'user_name' => $assignment['user_name'],
+                'device_name' => $assignment['device_name']
+            ]
         ];
 
     } catch (PDOException $e) {
@@ -3707,10 +3811,32 @@ function isUserAssignedToDevice($userId, $deviceId) {
     }
 }
 
-function bulkAssignUsersToDevice($deviceId, $userIds, $assignedBy) {
+function bulkAssignUsersToDevice($deviceId, $userIds, $assignedBy, $adminOrgId = null, $adminRole = null) {
     $pdoConn = getValidConnection();
 
     try {
+        // First validate the device exists and get its organization
+        $stmt = $pdoConn->prepare("SELECT id, organization_id, serial_number, device_name FROM devices WHERE id = ? AND status = 'active'");
+        $stmt->execute([$deviceId]);
+        $device = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$device) {
+            return [
+                'status' => 'error',
+                'message' => 'Device not found or inactive'
+            ];
+        }
+
+        // Verify admin has permission to assign users to this device's organization
+        if ($adminOrgId !== null && $adminRole !== null) {
+            if ($adminRole !== 'super_admin' && $adminOrgId != $device['organization_id']) {
+                return [
+                    'status' => 'error',
+                    'message' => 'Access denied: You do not have permission to assign users to devices in this organization'
+                ];
+            }
+        }
+
         $results = [
             'assigned' => 0,
             'reactivated' => 0,
@@ -3720,10 +3846,14 @@ function bulkAssignUsersToDevice($deviceId, $userIds, $assignedBy) {
         ];
 
         foreach ($userIds as $userId) {
-            $result = assignUserToDevice($userId, $deviceId, $assignedBy);
+            $result = assignUserToDevice($userId, $deviceId, $assignedBy, $adminOrgId, $adminRole);
 
             if ($result['status'] === 'success') {
-                $results['assigned']++;
+                if (strpos($result['message'], 'reactivated') !== false) {
+                    $results['reactivated']++;
+                } else {
+                    $results['assigned']++;
+                }
             } elseif ($result['status'] === 'exists') {
                 $results['already_assigned']++;
             } else {
@@ -3740,6 +3870,12 @@ function bulkAssignUsersToDevice($deviceId, $userIds, $assignedBy) {
         return [
             'status' => 'success',
             'message' => 'Bulk assignment completed',
+            'device' => [
+                'id' => $device['id'],
+                'serial_number' => $device['serial_number'],
+                'device_name' => $device['device_name'],
+                'organization_id' => $device['organization_id']
+            ],
             'results' => $results
         ];
 
