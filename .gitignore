@@ -1,3 +1,5 @@
 /vendor
 .env
 /*.sql
+router.php
+changes.md
