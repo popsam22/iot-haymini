@@ -1,20 +1,17 @@
 
-
-CREATE TABLE `tblt_timesheet` (
- `timesheetid` int(11) NOT NULL AUTO_INCREMENT,
- `punchingcode` decimal(11,0) NOT NULL,
- `date` date DEFAULT NULL,
- `time` time DEFAULT NULL,
- `Tid` varchar(50) COLLATE utf8mb4_bin DEFAULT NULL,
- `device_serial` varchar(100) DEFAULT NULL,
- `organization_id` INT DEFAULT NULL,
- PRIMARY KEY (`timesheetid`),
- FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
- INDEX idx_punchingcode (punchingcode),
- INDEX idx_date (date),
- INDEX idx_organization_date (organization_id, date),
- INDEX idx_device_serial (device_serial)
-) ENGINE=InnoDB AUTO_INCREMENT=105 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
+CREATE TABLE organizations (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    description TEXT,
+    address VARCHAR(255),
+    contact_person VARCHAR(255),
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE admins (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -26,7 +23,7 @@ CREATE TABLE admins (
     status ENUM('active', 'inactive') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     INDEX idx_email (email),
     INDEX idx_organization (organization_id)
@@ -41,7 +38,7 @@ CREATE TABLE organization_punch_settings (
     punch_out_end_time TIME DEFAULT '18:00:00',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     UNIQUE KEY unique_org_settings (organization_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -63,20 +60,6 @@ CREATE TABLE users (
     INDEX idx_org_punching_code (organization_id, punching_code),
     INDEX idx_organization (organization_id),
     INDEX idx_user_type (user_type),
-    INDEX idx_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE organizations (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(255) NOT NULL UNIQUE,
-    description TEXT,
-    address VARCHAR(255),
-    contact_person VARCHAR(255),
-    email VARCHAR(255),
-    phone VARCHAR(50),
-    status ENUM('active', 'inactive') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -163,3 +146,19 @@ CREATE TABLE user_device_assignments (
     INDEX idx_user (user_id),
     INDEX idx_device (device_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `tblt_timesheet` (
+ `timesheetid` int(11) NOT NULL AUTO_INCREMENT,
+ `punchingcode` decimal(11,0) NOT NULL,
+ `date` date DEFAULT NULL,
+ `time` time DEFAULT NULL,
+ `Tid` varchar(50) COLLATE utf8mb4_bin DEFAULT NULL,
+ `device_serial` varchar(100) DEFAULT NULL,
+ `organization_id` INT DEFAULT NULL,
+ PRIMARY KEY (`timesheetid`),
+ FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+ INDEX idx_punchingcode (punchingcode),
+ INDEX idx_date (date),
+ INDEX idx_organization_date (organization_id, date),
+ INDEX idx_device_serial (device_serial)
+) ENGINE=InnoDB AUTO_INCREMENT=105 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
