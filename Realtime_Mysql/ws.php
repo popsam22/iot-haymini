@@ -747,11 +747,13 @@ if (!$isApiRequest) {
     ob_implicit_flush();
 
     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-if(socket_bind($socket, $SERVER_IP, $SERVER_PORT)==false)
+
+socket_set_option($socket, SOL_SOCKET, SO_REUSEADDR, 1);
+if(socket_bind($socket, $SERVER_IP, $SERVER_PORT) == false)
 {
-	var_dump($SERVER_PORT);
-	echo " bind Failed ".$SERVER_IP.":".$SERVER_PORT;
-	exit;
+    var_dump($SERVER_PORT);
+    echo " bind Failed " . $SERVER_IP . ":" . $SERVER_PORT;
+    exit;
 }
 socket_listen($socket, $MAX_THREADS);
 //socket_set_nonblock($socket);
