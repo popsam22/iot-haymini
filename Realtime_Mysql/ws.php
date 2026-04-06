@@ -748,7 +748,7 @@ if (!$isApiRequest) {
 
     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
 
-socket_set_option($socket, SOL_SOCKET, SO_REUSEADDR, 1);
+    socket_set_option($socket, SOL_SOCKET, SO_REUSEADDR, 1);
 if(socket_bind($socket, $SERVER_IP, $SERVER_PORT) == false)
 {
     var_dump($SERVER_PORT);
@@ -4401,35 +4401,39 @@ function logAttendancePunch($userId, $punchingCode, $organizationId, $deviceSeri
         $isLate = isLatePunch($organizationId, $punchType, $punchDateTime);
         $isEarly = isEarlyPunch($organizationId, $punchType, $punchDateTime);
 
-        // Insert into attendance_logs
-        $stmt = $pdoConn->prepare("
+        // DEBUG - remove after fix
+        error_log("logAttendancePunch values: " . json_encode([
+            'punchingCode' => $punchingCode,
+            'userId' => $userId,
+            'organizationId' => $organizationId,
+            'deviceSerial' => $deviceSerial,
+            'punchDate' => $punchDate,
+            'punchTime' => $punchTime,
+            'punchDateTime' => $punchDateTime,
+            'punchType' => $punchType,
+            'isLate' => $isLate,
+            'isEarly' => $isEarly,
+            'ipAddress' => $ipAddress
+        ]));
+
+        $sql = "
             INSERT INTO attendance_logs
             (punching_code, user_id, organization_id, device_serial, punch_date, punch_time, punch_datetime,
              punch_type, is_late, is_early, ip_address)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
+        ";
 
+        // DEBUG - remove after fix
+        error_log("Executing SQL: " . preg_replace('/\s+/', ' ', $sql));
+
+        $stmt = $pdoConn->prepare($sql);
         $stmt->execute([
             $punchingCode, $userId, $organizationId, $deviceSerial, $punchDate, $punchTime,
             $punchDateTime, $punchType, $isLate, $isEarly, $ipAddress
+
         ]);
-
-        // Update or create daily attendance record
-        updateDailyAttendance($userId, $punchingCode, $organizationId, $punchDate);
-
-        return [
-            'status' => 'success',
-            'punch_type' => $punchType,
-            'is_late' => $isLate,
-            'is_early' => $isEarly
-        ];
-
-    } catch (PDOException $e) {
-        error_log("Database error in logAttendancePunch: " . $e->getMessage());
-        return [
-            'status' => 'error',
-            'message' => 'Failed to log attendance punch'
-        ];
+    } catch (Exception $e) {
+        error_log("logAttendancePunch error: " . $e->getMessage());
     }
 }
 
