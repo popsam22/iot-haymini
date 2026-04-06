@@ -19,14 +19,15 @@ function createDatabaseConnection() {
     
     try {
         $pdo = new PDO(
-            "mysql:host=".$MYSQL_HOST.";dbname=".$MYSQL_DB.";charset=utf8mb4",
+            "mysql:host=".$MYSQL_HOST.";port=25060;dbname=".$MYSQL_DB.";charset=utf8mb4",
             $MYSQL_USER,
             $MYSQL_PASS,
             array(
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_PERSISTENT => true,
                 PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
-                PDO::ATTR_TIMEOUT => 30
+                PDO::ATTR_TIMEOUT => 30,
+                PDO::MYSQL_ATTR_SSL_CA => '/etc/ssl/certs/ca-certificates.crt'
             )
         );
         
