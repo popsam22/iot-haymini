@@ -27,7 +27,7 @@ function createDatabaseConnection() {
                 PDO::ATTR_PERSISTENT => true,
                 PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
                 PDO::ATTR_TIMEOUT => 30,
-                PDO::MYSQL_ATTR_SSL_CA => '/etc/ssl/certs/ca-certificates.crt'
+                PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false
             )
         );
         
