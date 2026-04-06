@@ -3632,6 +3632,19 @@ function assignUserToDevice($userId, $deviceId, $assignedBy, $adminOrgId = null,
         $stmt->execute([$userId, $deviceId]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
+        // Validate assigned_by admin exists or use NULL
+        $validAssignedBy = $assignedBy;
+        if ($assignedBy !== null && !empty($assignedBy)) {
+            $stmt = $pdoConn->prepare("SELECT id FROM admins WHERE id = ?");
+            $stmt->execute([$assignedBy]);
+            if (!$stmt->fetchColumn()) {
+                // Admin doesn't exist, use NULL instead
+                $validAssignedBy = null;
+            }
+        } else {
+            $validAssignedBy = null;
+        }
+
         if ($existing) {
             if ($existing['status'] === 'active') {
                 return [
@@ -3641,7 +3654,7 @@ function assignUserToDevice($userId, $deviceId, $assignedBy, $adminOrgId = null,
             } else {
                 // Reactivate existing assignment
                 $stmt = $pdoConn->prepare("UPDATE user_device_assignments SET status = 'active', assigned_by = ?, assigned_at = NOW() WHERE id = ?");
-                $stmt->execute([$assignedBy, $existing['id']]);
+                $stmt->execute([$validAssignedBy, $existing['id']]);
 
                 error_log("Reactivated user-device assignment: User {$user['punching_code']} to Device {$device['serial_number']}");
 
@@ -3657,7 +3670,21 @@ function assignUserToDevice($userId, $deviceId, $assignedBy, $adminOrgId = null,
             INSERT INTO user_device_assignments (user_id, device_id, assigned_by, status)
             VALUES (?, ?, ?, 'active')
         ");
-        $stmt->execute([$userId, $deviceId, $assignedBy]);
+        $stmt->execute([$userId, $deviceId, $validAssignedBy]);
+            if (!$stmt->fetchColumn()) {
+                // Admin doesn't exist, use NULL instead
+                $validAssignedBy = null;
+            }
+        } else {
+            $validAssignedBy = null;
+        }
+
+        // Create new assignment
+        $stmt = $pdoConn->prepare("
+            INSERT INTO user_device_assignments (user_id, device_id, assigned_by, status)
+            VALUES (?, ?, ?, 'active')
+        ");
+        $stmt->execute([$userId, $deviceId, $validAssignedBy]);
 
         error_log("Created user-device assignment: User {$user['punching_code']} ({$user['name']}) to Device {$device['serial_number']} ({$device['device_name']})");
 
@@ -3709,9 +3736,21 @@ function removeUserFromDevice($userId, $deviceId, $removedBy, $adminOrgId = null
             }
         }
 
+        // Validate removed_by admin exists or use NULL
+        $validRemovedBy = $removedBy;
+        if ($removedBy !== null && !empty($removedBy)) {
+            $stmt = $pdoConn->prepare("SELECT id FROM admins WHERE id = ?");
+            $stmt->execute([$removedBy]);
+            if (!$stmt->fetchColumn()) {
+                $validRemovedBy = null;
+            }
+        } else {
+            $validRemovedBy = null;
+        }
+
         // Deactivate assignment
         $stmt = $pdoConn->prepare("UPDATE user_device_assignments SET status = 'inactive', assigned_by = ?, assigned_at = NOW() WHERE id = ?");
-        $stmt->execute([$removedBy, $assignment['id']]);
+        $stmt->execute([$validRemovedBy, $assignment['id']]);
 
         error_log("Removed user-device assignment: User {$assignment['punching_code']} from Device {$assignment['serial_number']}");
 
