@@ -205,13 +205,14 @@ function getCurrentUser() {
 header('Content-Type: application/json');
 
 // Parse the URL path for RESTful routing
-$requestUri = $_SERVER['REQUEST_URI'];
-$requestMethod = $_SERVER['REQUEST_METHOD'];
-$path = parse_url($requestUri, PHP_URL_PATH);
-$query = parse_url($requestUri, PHP_URL_QUERY);
+$requestUri = $_SERVER['REQUEST_URI'] ?? "/";
+$requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'CLI';
+$requestUri = $requestUri ?? '';
+$path = parse_url($requestUri, PHP_URL_PATH) ?? '';
+$query = parse_url($requestUri, PHP_URL_QUERY) ?? '';
 
 // Parse query parameters
-parse_str($query ?? '', $queryParams);
+parse_str($query, $queryParams);
 
 // Get JSON input for POST/PUT/DELETE requests
 $jsonInput = null;
