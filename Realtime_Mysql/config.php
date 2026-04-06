@@ -61,7 +61,10 @@ function getValidConnection() {
         error_log("Reconnecting to database...");
         $pdoConn = createDatabaseConnection();
     }
-    
+
+    $db = $pdoConn->query("SELECT DATABASE()")->fetchColumn();
+    error_log("Connected to database: " . $db);
+
     return $pdoConn;
 }
 
