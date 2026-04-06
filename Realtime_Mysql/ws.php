@@ -4457,8 +4457,18 @@ function logAttendancePunch($userId, $punchingCode, $organizationId, $deviceSeri
             $punchDateTime, $punchType, $isLate, $isEarly, $ipAddress
 
         ]);
+
+        return [
+            'status' => 'success',
+            'message' => 'Attendance logged successfully'
+        ];
+
     } catch (Exception $e) {
         error_log("logAttendancePunch error: " . $e->getMessage());
+        return [
+            'status' => 'error',
+            'message' => 'Failed to log attendance'
+        ];
     }
 }
 
