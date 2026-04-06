@@ -3671,20 +3671,6 @@ function assignUserToDevice($userId, $deviceId, $assignedBy, $adminOrgId = null,
             VALUES (?, ?, ?, 'active')
         ");
         $stmt->execute([$userId, $deviceId, $validAssignedBy]);
-            if (!$stmt->fetchColumn()) {
-                // Admin doesn't exist, use NULL instead
-                $validAssignedBy = null;
-            }
-        } else {
-            $validAssignedBy = null;
-        }
-
-        // Create new assignment
-        $stmt = $pdoConn->prepare("
-            INSERT INTO user_device_assignments (user_id, device_id, assigned_by, status)
-            VALUES (?, ?, ?, 'active')
-        ");
-        $stmt->execute([$userId, $deviceId, $validAssignedBy]);
 
         error_log("Created user-device assignment: User {$user['punching_code']} ({$user['name']}) to Device {$device['serial_number']} ({$device['device_name']})");
 
