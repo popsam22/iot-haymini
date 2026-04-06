@@ -131,6 +131,7 @@ try {
         organization_id INT NOT NULL,
         punch_date DATE NOT NULL,
         punch_time TIME NOT NULL,
+        punch_datetime DATETIME NOT NULL,
         punch_type ENUM('in', 'out') NOT NULL,
         device_serial VARCHAR(100),
         ip_address VARCHAR(45),
@@ -161,10 +162,13 @@ try {
         punch_in_time TIME,
         punch_out_time TIME,
         total_hours DECIMAL(5,2),
+        is_late BOOLEAN DEFAULT FALSE,
+        is_early_out BOOLEAN DEFAULT FALSE,
         late_minutes INT DEFAULT 0,
         early_out_minutes INT DEFAULT 0,
         overtime_hours DECIMAL(5,2) DEFAULT 0,
         status ENUM('present', 'absent', 'late', 'half_day', 'early_out') DEFAULT 'absent',
+        auto_generated BOOLEAN DEFAULT FALSE,
         notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -200,8 +204,31 @@ try {
     $pdoConn->exec($sql);
     echo "✓ Organization punch settings table created\n";
 
-    // Step 9: Create user_device_assignments table
-    echo "Step 9: Creating user_device_assignments table...\n";
+    // Step 9: Create absence_records table
+    echo "Step 9: Creating absence_records table...\n";
+    $sql = "CREATE TABLE IF NOT EXISTS absence_records (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        organization_id INT NOT NULL,
+        absence_date DATE NOT NULL,
+        absence_type ENUM('absent', 'excused', 'on_duty', 'other') DEFAULT 'absent',
+        excused_by INT NULL,
+        excused_at TIMESTAMP NULL,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (excused_by) REFERENCES admins(id) ON DELETE SET NULL,
+        UNIQUE KEY unique_user_absence_date (user_id, absence_date),
+        INDEX idx_organization_date (organization_id, absence_date),
+        INDEX idx_absence_type (absence_type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+    $pdoConn->exec($sql);
+    echo "✓ Absence records table created\n";
+
+    // Step 10: Create user_device_assignments table
+    echo "Step 10: Creating user_device_assignments table...\n";
     $sql = "CREATE TABLE IF NOT EXISTS user_device_assignments (
         id INT PRIMARY KEY AUTO_INCREMENT,
         user_id INT NOT NULL,
@@ -225,7 +252,7 @@ try {
     // Re-enable foreign key checks
     $pdoConn->exec("SET FOREIGN_KEY_CHECKS = 1");
 
-    // Step 10: Verification
+    // Step 11: Verification
     echo "\n=== VERIFICATION ===\n";
     $tables = [
         'organizations',
@@ -236,6 +263,7 @@ try {
         'attendance_logs',
         'daily_attendance',
         'organization_punch_settings',
+        'absence_records',
         'user_device_assignments'
     ];
 
