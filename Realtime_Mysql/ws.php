@@ -4423,8 +4423,8 @@ function logAttendancePunch($userId, $punchingCode, $organizationId, $deviceSeri
         $punchDate = date('Y-m-d', strtotime($punchDateTime));
         $punchTime = date('H:i:s', strtotime($punchDateTime));
         $punchType = determinePunchType($organizationId, $punchDateTime);
-        $isLate = isLatePunch($organizationId, $punchType, $punchDateTime);
-        $isEarly = isEarlyPunch($organizationId, $punchType, $punchDateTime);
+        $isLate = isLatePunch($organizationId, $punchType, $punchDateTime) ? 1 : 0;
+        $isEarly = isEarlyPunch($organizationId, $punchType, $punchDateTime) ? 1 : 0;
 
         // DEBUG - remove after fix
         error_log("logAttendancePunch values: " . json_encode([
