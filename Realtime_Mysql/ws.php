@@ -4460,7 +4460,10 @@ function logAttendancePunch($userId, $punchingCode, $organizationId, $deviceSeri
 
         return [
             'status' => 'success',
-            'message' => 'Attendance logged successfully'
+            'message' => 'Attendance logged successfully',
+            'punch_type' => $punchType,
+            'is_late' => $isLate,
+            'is_early' => $isEarly
         ];
 
     } catch (Exception $e) {
