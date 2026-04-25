@@ -21,13 +21,13 @@
     $mail->isSMTP();                                                 
     $mail->Host       = $_ENV['MAILER_HOST'];             
     $mail->SMTPAuth   = true;                                                   
-    $mail->Username   = $_ENV['USERNAME'];                         
-    $mail->Password   = $_ENV['PASSWORD'];                              
-    $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;                
-    $mail->Port       = $_ENV['MAILER_PORT'];            
+    $mail->Username   = $_ENV['MAILER_USERNAME'];
+    $mail->Password   = $_ENV['MAILER_PASSWORD'];
+    $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+    $mail->Port       = $_ENV['MAILER_PORT'];
 
     //Recipient
-    $mail->setFrom($_ENV['USERNAME'], $_ENV['TERMII_SENDER_ID']);
+    $mail->setFrom($_ENV['MAILER_USERNAME'], $_ENV['TERMII_SENDER_ID']);
     $mail->addAddress($to);
 
     //Content
