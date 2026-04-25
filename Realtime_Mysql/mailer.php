@@ -32,6 +32,17 @@
 
     error_log("$logPrefix SMTP config — HOST: $host | PORT: $port | USER: $username | SENDER_NAME: $sender");
 
+    // Quick TCP reachability check — catches blocked ports before PHPMailer hangs
+    $tcpStart = microtime(true);
+    $socket = @fsockopen("ssl://$host", (int)$port, $errno, $errstr, 10);
+    $tcpMs = round((microtime(true) - $tcpStart) * 1000);
+    if (!$socket) {
+        error_log("$logPrefix FAILED — TCP connect to $host:$port failed in {$tcpMs}ms — errno=$errno errstr=$errstr (port likely blocked by host firewall)");
+        return false;
+    }
+    fclose($socket);
+    error_log("$logPrefix TCP connect OK in {$tcpMs}ms");
+
     $mail = new PHPMailer(true);
     try {
     $mail->SMTPDebug = SMTP::DEBUG_SERVER;
@@ -45,6 +56,7 @@
     $mail->Password   = $password;
     $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
     $mail->Port       = $port;
+    $mail->Timeout    = 15;
 
     $mail->setFrom($username, $sender);
     $mail->addAddress($to);
