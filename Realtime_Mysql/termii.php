@@ -1,48 +1,75 @@
 <?php
 require __DIR__ . '/../vendor/autoload.php';
 use Dotenv\Dotenv;
-  
+
 $dotenv = Dotenv::createImmutable(__DIR__. '/../');
 $dotenv->load();
 
 function sendSms($message, $phone){
-  $curl = curl_init();
+  $logPrefix = "[SMS][" . date('Y-m-d H:i:s') . "]";
 
-  $BASE_URL = $_ENV['BASE_URL'];
+  error_log("$logPrefix Attempting — To: $phone | Message: $message");
+
+  if (empty($phone)) {
+      error_log("$logPrefix ABORTED — phone number is empty");
+      return false;
+  }
+
+  $baseUrl   = $_ENV['BASE_URL']          ?? null;
+  $apiKey    = $_ENV['TERMII_API_KEY']    ?? null;
+  $senderId  = $_ENV['TERMII_SENDER_ID']  ?? null;
+
+  if (!$baseUrl || !$apiKey || !$senderId) {
+      error_log("$logPrefix ABORTED — missing Termii config: BASE_URL=" . ($baseUrl ?: 'MISSING') . " API_KEY=" . ($apiKey ? 'SET' : 'MISSING') . " SENDER_ID=" . ($senderId ?: 'MISSING'));
+      return false;
+  }
+
+  error_log("$logPrefix Termii config — BASE_URL: $baseUrl | SENDER_ID: $senderId");
 
   $data = [
-    "to" => $phone,
-    "from" => $_ENV['TERMII_SENDER_ID'],
-    "type" => "plain",
+    "to"      => $phone,
+    "from"    => $senderId,
+    "type"    => "plain",
     "channel" => "generic",
-    "api_key" => $_ENV['TERMII_API_KEY'],
-    "sms" => "Kindly note that the card bearer with $message, just arrived at school"
+    "api_key" => $apiKey,
+    "sms"     => "Kindly note that the card bearer with $message, just arrived at school"
   ];
 
-  $post_data = json_encode($data);
-
-  curl_setopt_array($curl, array(
-  CURLOPT_URL => $BASE_URL,
-  CURLOPT_RETURNTRANSFER => true,
-  CURLOPT_ENCODING => "",
-  CURLOPT_MAXREDIRS => 10,
-  CURLOPT_TIMEOUT => 0,
-  CURLOPT_FOLLOWLOCATION => true,
-  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-  CURLOPT_CUSTOMREQUEST => "POST",
-  CURLOPT_POSTFIELDS => $post_data,
-  CURLOPT_HTTPHEADER => array(
-    "Content-Type: application/json"
-  ),
-  ));
+  $curl = curl_init();
+  curl_setopt_array($curl, [
+    CURLOPT_URL            => $baseUrl,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_ENCODING       => "",
+    CURLOPT_MAXREDIRS      => 10,
+    CURLOPT_TIMEOUT        => 30,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+    CURLOPT_CUSTOMREQUEST  => "POST",
+    CURLOPT_POSTFIELDS     => json_encode($data),
+    CURLOPT_HTTPHEADER     => ["Content-Type: application/json"],
+  ]);
 
   $response = curl_exec($curl);
-  if (curl_errno($curl)) {
-        echo "cURL Error: " . curl_error($curl);
-    }
-
+  $curlError = curl_error($curl);
+  $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
   curl_close($curl);
-  var_dump($response);
-  echo $response;
+
+  if ($curlError) {
+      error_log("$logPrefix FAILED — cURL error: $curlError");
+      return false;
+  }
+
+  error_log("$logPrefix HTTP $httpCode — Response: $response");
+
+  $decoded = json_decode($response, true);
+  $status  = $decoded['message'] ?? $decoded['code'] ?? 'unknown';
+
+  if ($httpCode >= 200 && $httpCode < 300) {
+      error_log("$logPrefix SUCCESS — SMS dispatched to: $phone | Termii status: $status");
+      return true;
+  }
+
+  error_log("$logPrefix FAILED — HTTP $httpCode | Termii status: $status");
+  return false;
 }
 ?>
