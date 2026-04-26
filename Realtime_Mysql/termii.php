@@ -32,7 +32,7 @@ function sendSms($message, $phone){
     "type"    => "plain",
     "channel" => "generic",
     "api_key" => $apiKey,
-    "sms"     => "Kindly note that the card bearer with $message, just arrived at school"
+    "sms"     => $message
   ];
 
   $curl = curl_init();
