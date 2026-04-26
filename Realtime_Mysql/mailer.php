@@ -1,77 +1,83 @@
 <?php
- require __DIR__ . '/../vendor/autoload.php';
-  use PHPMailer\PHPMailer\PHPMailer;
-  use PHPMailer\PHPMailer\Exception;
-  use PHPMailer\PHPMailer\SMTP;
-  use Dotenv\Dotenv;
+require __DIR__ . '/../vendor/autoload.php';
+use Dotenv\Dotenv;
 
-  $dotenv = Dotenv::createImmutable(__DIR__. '/../');
-  $dotenv->load();
-  date_default_timezone_set('Africa/Lagos');
+$dotenv = Dotenv::createImmutable(__DIR__ . '/../');
+$dotenv->load();
+date_default_timezone_set('Africa/Lagos');
 
-  function sendEmail($to, $message, $subject){
-    $logPrefix = "[EMAIL][" . date('Y-m-d H:i:s') . "]";
+/**
+ * Send an email via the Resend API.
+ *
+ * @param  string $to      Recipient email address
+ * @param  string $message HTML body
+ * @param  string $subject Email subject line
+ * @return bool
+ */
+function sendEmail(string $to, string $message, string $subject): bool
+{
+    $logPrefix = '[EMAIL][' . date('Y-m-d H:i:s') . ']';
 
     error_log("$logPrefix Attempting — To: $to | Subject: $subject");
 
-    if (empty($to)) {
-        error_log("$logPrefix ABORTED — recipient email is empty");
+    if (empty($to) || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        error_log("$logPrefix ABORTED — invalid or empty recipient: '$to'");
         return false;
     }
 
-    $host     = $_ENV['MAILER_HOST']      ?? null;
-    $username = $_ENV['MAILER_USERNAME']  ?? null;
-    $password = $_ENV['MAILER_PASSWORD']  ?? null;
-    $port     = $_ENV['MAILER_PORT']      ?? null;
-    $sender   = $_ENV['TERMII_SENDER_ID'] ?? null;
-
-    if (!$host || !$username || !$password || !$port) {
-        error_log("$logPrefix ABORTED — missing SMTP config: HOST=" . ($host ?: 'MISSING') . " USER=" . ($username ?: 'MISSING') . " PORT=" . ($port ?: 'MISSING') . " PASS=" . ($password ? 'SET' : 'MISSING'));
+    if (empty($subject)) {
+        error_log("$logPrefix ABORTED — subject is empty");
         return false;
     }
 
-    error_log("$logPrefix SMTP config — HOST: $host | PORT: $port | USER: $username | SENDER_NAME: $sender");
+    $apiKey  = $_ENV['RESEND_API_KEY'] ?? null;
+    $from    = $_ENV['RESEND_FROM']    ?? null;
 
-    // Quick TCP reachability check — catches blocked ports before PHPMailer hangs
-    $tcpStart = microtime(true);
-    $socket = @fsockopen("ssl://$host", (int)$port, $errno, $errstr, 10);
-    $tcpMs = round((microtime(true) - $tcpStart) * 1000);
-    if (!$socket) {
-        error_log("$logPrefix FAILED — TCP connect to $host:$port failed in {$tcpMs}ms — errno=$errno errstr=$errstr (port likely blocked by host firewall)");
+    if (!$apiKey || !$from) {
+        error_log("$logPrefix ABORTED — missing config: RESEND_API_KEY=" . ($apiKey ? 'SET' : 'MISSING') . " RESEND_FROM=" . ($from ?: 'MISSING'));
         return false;
     }
-    fclose($socket);
-    error_log("$logPrefix TCP connect OK in {$tcpMs}ms");
 
-    $mail = new PHPMailer(true);
-    try {
-    $mail->SMTPDebug = SMTP::DEBUG_SERVER;
-    $mail->Debugoutput = function($str, $level) use ($logPrefix) {
-        error_log("$logPrefix [SMTP] " . trim($str));
-    };
-    $mail->isSMTP();
-    $mail->Host       = $host;
-    $mail->SMTPAuth   = true;
-    $mail->Username   = $username;
-    $mail->Password   = $password;
-    $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-    $mail->Port       = $port;
-    $mail->Timeout    = 15;
+    $payload = json_encode([
+        'from'    => $from,
+        'to'      => [$to],
+        'subject' => $subject,
+        'html'    => $message,
+    ]);
 
-    $mail->setFrom($username, $sender);
-    $mail->addAddress($to);
+    $ch = curl_init('https://api.resend.com/emails');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $apiKey,
+            'Content-Type: application/json',
+        ],
+    ]);
 
-    $mail->isHTML(true);
-    $mail->Subject = $subject;
-    $mail->Body    = $message;
+    $start    = microtime(true);
+    $response = curl_exec($ch);
+    $ms       = round((microtime(true) - $start) * 1000);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
 
-    $mail->send();
-    error_log("$logPrefix SUCCESS — email delivered to: $to");
-    return true;
-  } catch (Exception $e) {
-    error_log("$logPrefix FAILED — PHPMailer: {$mail->ErrorInfo}");
-    error_log("$logPrefix FAILED — Exception: " . $e->getMessage());
+    if ($curlErr) {
+        error_log("$logPrefix FAILED — cURL error: $curlErr");
+        return false;
+    }
+
+    $body = json_decode($response, true);
+
+    if ($httpCode >= 200 && $httpCode < 300) {
+        $id = $body['id'] ?? 'unknown';
+        error_log("$logPrefix SUCCESS — delivered to: $to | id: $id | {$ms}ms");
+        return true;
+    }
+
+    $errMsg = $body['message'] ?? $body['name'] ?? $response;
+    error_log("$logPrefix FAILED — HTTP $httpCode | {$ms}ms | $errMsg");
     return false;
-  }
 }
-?>
