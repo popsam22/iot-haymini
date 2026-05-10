@@ -1562,6 +1562,8 @@ function store($records, $deviceSerial, $sts = 0) {
 
             // Log punch details
             error_log("Enhanced punch logged - User: {$record['enrollid']}, Type: {$punchResult['punch_type']}, Late: " . ($punchResult['is_late'] ? 'Yes' : 'No') . ", Early: " . ($punchResult['is_early'] ? 'Yes' : 'No'));
+
+            updateDailyAttendance($user['id'], $record["enrollid"], $organizationId, date("Y-m-d", strtotime($record["time"])));
         } else {
             error_log("Failed to log enhanced attendance for user: {$record['enrollid']}");
         }
