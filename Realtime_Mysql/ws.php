@@ -1458,7 +1458,7 @@ function store($records, $deviceSerial, $sts = 0) {
             // CRITICAL: Lookup user scoped by BOTH punching_code AND organization_id
             // This ensures we get the correct user when same punching code exists in multiple organizations
             $stmt = $pdoConn->prepare("
-                SELECT u.id, u.name, u.email, u.phone_number, u.organization_id, u.status,
+                SELECT u.id, u.name, u.email, u.phone_number, u.organization_id, u.status, u.user_type,
                        o.status as organization_status, o.name as organization_name
                 FROM users u
                 LEFT JOIN organizations o ON u.organization_id = o.id
@@ -1581,13 +1581,14 @@ function store($records, $deviceSerial, $sts = 0) {
 
                 // Send email notification
                 $location = $device['device_name'] ?? 'Device ' . $deviceSerial;
+                $userType = $user['user_type'] ?? 'student';
 
                 if ($punchType === 'in') {
                     $subject = sprintf('🔔 School Arrival Notification: %s', $organizationName);
-                    $emailMessage = generatePunchEmail('in', $userName, $record["enrollid"], $checkTime, $location, $organizationName);
+                    $emailMessage = generatePunchEmail('in', $userName, $record["enrollid"], $checkTime, $location, $organizationName, $userType);
                 } elseif ($punchType === 'out') {
                     $subject = sprintf('🔔 School Departure Notification: %s', $organizationName);
-                    $emailMessage = generatePunchEmail('out', $userName, $record["enrollid"], $checkTime, $location, $organizationName);
+                    $emailMessage = generatePunchEmail('out', $userName, $record["enrollid"], $checkTime, $location, $organizationName, $userType);
                 } else {
                     $subject = sprintf('Attendance Alert: %s', $organizationName);
                     $emailMessage = sprintf(
@@ -1618,7 +1619,7 @@ function store($records, $deviceSerial, $sts = 0) {
                         );
                     } elseif ($punchType === 'out') {
                         $smsMessage = sprintf(
-                            '%s: %s (ID: %s) has checked out of school. Time: %s.',
+                            '%s: %s (ID: %s) has checked out. Time: %s.',
                             $organizationName,
                             $userName,
                             $record["enrollid"],
@@ -3144,27 +3145,45 @@ function loginAdmin($email, $password) {
     }
 }
 
-function generatePunchEmail(string $punchType, string $userName, string $studentId, string $checkTime, string $location, string $organizationName): string
+function generatePunchEmail(string $punchType, string $userName, string $userId, string $checkTime, string $location, string $organizationName, string $userType = 'student'): string
 {
-    $isIn = $punchType === 'in';
+    $isIn      = $punchType === 'in';
+    $isStudent = $userType === 'student';
 
-    $headerGradient  = $isIn
+    $headerGradient = $isIn
         ? 'linear-gradient(135deg, #38a169 0%, #276749 100%)'
         : 'linear-gradient(135deg, #dd6b20 0%, #9c4221 100%)';
-    $accentColor     = $isIn ? '#38a169' : '#dd6b20';
-    $title           = $isIn ? '🔔 School Arrival Notification' : '🔔 School Departure Notification';
-    $subheading      = $isIn ? 'Safe Arrival Confirmed' : 'Departure Recorded';
-    $timeLabel       = $isIn ? 'Check-in Time' : 'Check-out Time';
+    $accentColor = $isIn ? '#38a169' : '#dd6b20';
+    $title       = $isIn ? '🔔 School Arrival Notification' : '🔔 School Departure Notification';
+    $subheading  = $isIn ? 'Safe Arrival Confirmed' : 'Departure Recorded';
+    $timeLabel   = $isIn ? 'Check-in Time' : 'Check-out Time';
 
-    $bodyText = $isIn
-        ? "We are writing to let you know that <strong>{$userName}</strong> has successfully checked into school for the day. Please find the arrival details below:"
-        : "This is an automated notification to inform you that <strong>{$userName}</strong> has checked out and is now leaving the school premises. Please find the departure details below:";
+    $greeting  = $isStudent ? 'Dear Parent/Guardian,' : 'Dear Recipient,';
+    $nameLabel = $isStudent ? 'Student Name:' : 'Staff Name:';
+    $idLabel   = $isStudent ? 'Student ID:' : 'Staff ID:';
 
-    $footerText = $isIn
-        ? "<p style='font-size:15px;color:#555;margin-top:20px;'>No further action is required. We look forward to a great day of learning!</p>"
-        : "<div style='background-color:#fff5f0;border-left:4px solid:{$accentColor};padding:16px 20px;margin:25px 0;border-radius:0 5px 5px 0;'>
-               <p style='margin:0;color:#7b341e;font-size:14px;'>If you were not expecting your child to leave at this time, please contact the school office immediately.</p>
+    if ($isIn) {
+        $bodyText = $isStudent
+            ? "We are writing to let you know that <strong>{$userName}</strong> has successfully checked into school for the day. Please find the arrival details below:"
+            : "This is to notify you that <strong>{$userName}</strong> has successfully checked in. Please find the details below:";
+    } else {
+        $bodyText = $isStudent
+            ? "This is an automated notification to inform you that <strong>{$userName}</strong> has checked out and is now leaving the school premises. Please find the departure details below:"
+            : "This is to notify you that <strong>{$userName}</strong> has checked out and is departing the premises. Please find the details below:";
+    }
+
+    if ($isIn) {
+        $footerText = $isStudent
+            ? "<p style='font-size:15px;color:#555;margin-top:20px;'>No further action is required. We look forward to a great day of learning!</p>"
+            : "<p style='font-size:15px;color:#555;margin-top:20px;'>No further action is required.</p>";
+    } else {
+        $alertMsg = $isStudent
+            ? 'If you were not expecting your child to leave at this time, please contact the school office immediately.'
+            : 'If this check-out was unexpected, please contact the school office immediately.';
+        $footerText = "<div style='background-color:#fff5f0;border-left:4px solid {$accentColor};padding:16px 20px;margin:25px 0;border-radius:0 5px 5px 0;'>
+               <p style='margin:0;color:#7b341e;font-size:14px;'>{$alertMsg}</p>
            </div>";
+    }
 
     $signoff = $isIn ? 'Best regards' : 'Safe travels';
 
@@ -3187,7 +3206,7 @@ function generatePunchEmail(string $punchType, string $userName, string $student
 
         <!-- Content -->
         <div style='padding:30px 20px;'>
-            <h2 style='color:{$accentColor};margin-bottom:16px;font-size:20px;'>Dear Parent/Guardian,</h2>
+            <h2 style='color:{$accentColor};margin-bottom:16px;font-size:20px;'>{$greeting}</h2>
 
             <p style='font-size:15px;color:#555;margin-bottom:25px;'>{$bodyText}</p>
 
@@ -3198,12 +3217,12 @@ function generatePunchEmail(string $punchType, string $userName, string $student
                 </h3>
                 <table style='width:100%;border-collapse:collapse;'>
                     <tr>
-                        <td style='padding:8px 0;color:#333;font-weight:bold;width:40%;'>Student Name:</td>
+                        <td style='padding:8px 0;color:#333;font-weight:bold;width:40%;'>{$nameLabel}</td>
                         <td style='padding:8px 0;color:#555;'>{$userName}</td>
                     </tr>
                     <tr>
-                        <td style='padding:8px 0;color:#333;font-weight:bold;'>Student ID:</td>
-                        <td style='padding:8px 0;color:#555;'>{$studentId}</td>
+                        <td style='padding:8px 0;color:#333;font-weight:bold;'>{$idLabel}</td>
+                        <td style='padding:8px 0;color:#555;'>{$userId}</td>
                     </tr>
                     <tr>
                         <td style='padding:8px 0;color:#333;font-weight:bold;'>{$timeLabel}:</td>
