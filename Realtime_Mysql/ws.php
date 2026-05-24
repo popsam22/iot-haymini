@@ -4593,7 +4593,7 @@ function updateDailyAttendance($userId, $punchingCode, $organizationId, $date) {
             $totalHours = (strtotime($punchOutTime) - strtotime($punchInTime)) / 3600;
             $status = $isLate ? 'late' : ($isEarlyOut ? 'early_out' : 'present');
         } elseif ($punchInTime) {
-            $status = 'partial';
+            $status = 'half_day';
         }
 
         // Insert or update daily attendance
