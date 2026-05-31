@@ -601,7 +601,11 @@ switch ($requestMethod) {
             }
 
             $defaultOrganizationId = $_POST['organization_id'] ?? null;
-            echo json_encode(uploadUsersFromCSV($csvFile, $defaultOrganizationId));
+            $uploadResult = uploadUsersFromCSV($csvFile, $defaultOrganizationId);
+            if (isset($uploadResult['status']) && $uploadResult['status'] === 'error') {
+                http_response_code(400);
+            }
+            echo json_encode($uploadResult);
 
         } elseif (preg_match('/\/api\/organizations\/(\d+)\/generate-absence-records$/', $path, $matches)) {
             requireAuth();
