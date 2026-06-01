@@ -4153,7 +4153,7 @@ function parseCSVFile($filePath) {
             'email' => isset($headerMap['email']) ? trim($data[$headerMap['email']] ?? '') : '',
             'phone' => isset($headerMap['phone']) ? trim($data[$headerMap['phone']] ?? '') : '',
             'organization_id' => isset($headerMap['organization_id']) ? trim($data[$headerMap['organization_id']] ?? '') : null,
-            'user_type' => isset($headerMap['user_type']) ? trim($data[$headerMap['user_type']] ?? '') : 'student'
+            'user_type' => isset($headerMap['user_type']) ? strtolower(trim($data[$headerMap['user_type']] ?? '')) : 'student'
         ];
 
         // Validate row data
