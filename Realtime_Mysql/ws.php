@@ -270,6 +270,9 @@ switch ($requestMethod) {
             $organizationId = (int)$matches[1];
             echo json_encode(getOrganizationDeviceAssignments($organizationId));
 
+        } elseif (preg_match('/\/api\/users\/csv-template$/', $path)) {
+            requireAuth();
+            generateUserCSVTemplate();
 
         } elseif (preg_match('/\/api\/users\/([^\/]+)$/', $path, $matches)) {
             $user = requireAuth();
@@ -331,10 +334,6 @@ switch ($requestMethod) {
             requireAuth();
             $deviceId = (int)$matches[1];
             echo json_encode(getDeviceAssignedUsers($deviceId));
-
-        } elseif (preg_match('/\/api\/users\/csv-template$/', $path)) {
-            requireAuth();
-            generateUserCSVTemplate();
 
         } elseif (preg_match('/\/api\/users$/', $path)) {
             requireAuth();
