@@ -612,15 +612,19 @@ switch ($requestMethod) {
             $date = $jsonInput['date'] ?? null;
             echo json_encode(generateAbsenceRecords($organizationId, $date));
 
+        } elseif (preg_match('/\/api\/backfill-daily-attendance$/', $path)) {
+            requireSuperAdmin();
+            echo json_encode(backfillDailyAttendance());
+
         } elseif (preg_match('/\/api\/setup\/default-admin$/', $path)) {
             echo json_encode(createDefaultSuperAdmin());
-            
+
         } else {
             http_response_code(404);
             echo json_encode(['error' => 'Endpoint not found']);
         }
         break;
-        
+
     case 'PUT':
         if (preg_match('/\/api\/organizations\/(\d+)$/', $path, $matches)) {
             $organizationId = (int)$matches[1];
@@ -1566,7 +1570,39 @@ function store($records, $deviceSerial, $sts = 0) {
             // Log punch details
             error_log("Enhanced punch logged - User: {$record['enrollid']}, Type: {$punchResult['punch_type']}, Late: " . ($punchResult['is_late'] ? 'Yes' : 'No') . ", Early: " . ($punchResult['is_early'] ? 'Yes' : 'No'));
 
-            updateDailyAttendance($user['id'], $record["enrollid"], $organizationId, date("Y-m-d", strtotime($record["time"])));
+            $dailyResult = updateDailyAttendance($user['id'], $record["enrollid"], $organizationId, date("Y-m-d", strtotime($record["time"])));
+            if (!$dailyResult) {
+                error_log("updateDailyAttendance FAILED for user_id={$user['id']}, org=$organizationId, date=" . date("Y-m-d", strtotime($record["time"])));
+            }
+
+            // --- DB write confirmation ---
+            $punchDate = date("Y-m-d", strtotime($record["time"]));
+            $punchTime = date("H:i:s", strtotime($record["time"]));
+
+            error_log("[PUNCH_CONFIRM] ===== PUNCH TRIGGERED =====");
+            error_log("[PUNCH_CONFIRM] Input  -> user_id={$user['id']}, name={$user['name']}, punching_code={$record['enrollid']}, org=$organizationId, device=$deviceSerial");
+            error_log("[PUNCH_CONFIRM] Input  -> date=$punchDate, time=$punchTime, punch_type={$punchResult['punch_type']}, is_late={$punchResult['is_late']}, is_early={$punchResult['is_early']}");
+
+            $alStmt = $pdoConn->prepare("SELECT * FROM attendance_logs WHERE user_id = ? AND punch_date = ? AND punch_time = ? ORDER BY id DESC LIMIT 1");
+            $alStmt->execute([$user['id'], $punchDate, $punchTime]);
+            $alRow = $alStmt->fetch(PDO::FETCH_ASSOC);
+            if ($alRow) {
+                error_log("[PUNCH_CONFIRM] attendance_logs -> " . json_encode($alRow));
+            } else {
+                error_log("[PUNCH_CONFIRM] attendance_logs -> ROW NOT FOUND (INSERT FAILED)");
+            }
+
+            $daStmt = $pdoConn->prepare("SELECT * FROM daily_attendance WHERE user_id = ? AND attendance_date = ? AND organization_id = ? LIMIT 1");
+            $daStmt->execute([$user['id'], $punchDate, $organizationId]);
+            $daRow = $daStmt->fetch(PDO::FETCH_ASSOC);
+            if ($daRow) {
+                error_log("[PUNCH_CONFIRM] daily_attendance -> " . json_encode($daRow));
+            } else {
+                error_log("[PUNCH_CONFIRM] daily_attendance -> ROW NOT FOUND (updateDailyAttendance produced no row)");
+            }
+
+            error_log("[PUNCH_CONFIRM] tblt_timesheet (queued) -> punchingcode={$record['enrollid']}, date=$punchDate, time=$punchTime, Tid=$deviceSerial, device_serial=$deviceSerial, org=$organizationId");
+            error_log("[PUNCH_CONFIRM] ===========================");
         } else {
             error_log("Failed to log enhanced attendance for user: {$record['enrollid']}");
         }
@@ -2444,7 +2480,16 @@ function getAllLogs($date_from = null, $date_to = null, $user_name = null) {
                        u.id as user_id, t.organization_id, u.name, u.user_type, o.name as organization_name, o.status as organization_status,
                        d.device_name, d.serial_number,
                        al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
-                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                       COALESCE(da.punch_in_time,  al_summary.computed_punch_in)  AS punch_in_time,
+                       COALESCE(da.punch_out_time, al_summary.computed_punch_out) AS punch_out_time,
+                       COALESCE(da.total_hours,
+                           CASE
+                               WHEN al_summary.computed_punch_in IS NOT NULL AND al_summary.computed_punch_out IS NOT NULL
+                               THEN ROUND(TIME_TO_SEC(TIMEDIFF(al_summary.computed_punch_out, al_summary.computed_punch_in)) / 3600, 2)
+                               ELSE NULL
+                           END
+                       ) AS total_hours,
+                       da.status AS daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
@@ -2452,7 +2497,14 @@ function getAllLogs($date_from = null, $date_to = null, $user_name = null) {
                 LEFT JOIN devices d ON t.device_serial = d.serial_number
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
-                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
+                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date AND t.organization_id = da.organization_id
+                LEFT JOIN (
+                    SELECT user_id, punch_date,
+                           MIN(CASE WHEN punch_type = \'in\'  THEN punch_time END) AS computed_punch_in,
+                           MAX(CASE WHEN punch_type = \'out\' THEN punch_time END) AS computed_punch_out
+                    FROM attendance_logs
+                    GROUP BY user_id, punch_date
+                ) al_summary ON u.id = al_summary.user_id AND t.date = al_summary.punch_date
                 WHERE 1=1';
 
         $params = [];
@@ -2502,7 +2554,16 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null, $date_fro
             SELECT t.*, u.name, o.name as organization_name, o.status as organization_status,
                    d.device_name, d.serial_number,
                    al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
-                   da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                   COALESCE(da.punch_in_time,  al_summary.computed_punch_in)  AS punch_in_time,
+                   COALESCE(da.punch_out_time, al_summary.computed_punch_out) AS punch_out_time,
+                   COALESCE(da.total_hours,
+                       CASE
+                           WHEN al_summary.computed_punch_in IS NOT NULL AND al_summary.computed_punch_out IS NOT NULL
+                           THEN ROUND(TIME_TO_SEC(TIMEDIFF(al_summary.computed_punch_out, al_summary.computed_punch_in)) / 3600, 2)
+                           ELSE NULL
+                       END
+                   ) AS total_hours,
+                   da.status AS daily_status,
                    da.late_minutes, da.early_out_minutes, da.overtime_hours
             FROM tblt_timesheet t
             LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
@@ -2510,7 +2571,14 @@ function getLogsByPunchingCode($punchingCode, $organization_id = null, $date_fro
             LEFT JOIN devices d ON t.device_serial = d.serial_number
             LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                 AND t.date = al.punch_date AND t.time = al.punch_time
-            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date AND t.organization_id = da.organization_id
+            LEFT JOIN (
+                SELECT user_id, punch_date,
+                       MIN(CASE WHEN punch_type = 'in'  THEN punch_time END) AS computed_punch_in,
+                       MAX(CASE WHEN punch_type = 'out' THEN punch_time END) AS computed_punch_out
+                FROM attendance_logs
+                GROUP BY user_id, punch_date
+            ) al_summary ON u.id = al_summary.user_id AND t.date = al_summary.punch_date
             WHERE t.punchingcode = ?
         ";
 
@@ -2605,7 +2673,16 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
             SELECT t.*, u.name, u.email, u.phone_number, u.user_type, o.name as organization_name, o.status as organization_status,
                    d.device_name, d.serial_number,
                    al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
-                   da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                   COALESCE(da.punch_in_time,  al_summary.computed_punch_in)  AS punch_in_time,
+                   COALESCE(da.punch_out_time, al_summary.computed_punch_out) AS punch_out_time,
+                   COALESCE(da.total_hours,
+                       CASE
+                           WHEN al_summary.computed_punch_in IS NOT NULL AND al_summary.computed_punch_out IS NOT NULL
+                           THEN ROUND(TIME_TO_SEC(TIMEDIFF(al_summary.computed_punch_out, al_summary.computed_punch_in)) / 3600, 2)
+                           ELSE NULL
+                       END
+                   ) AS total_hours,
+                   da.status AS daily_status,
                    da.late_minutes, da.early_out_minutes, da.overtime_hours
             FROM tblt_timesheet t
             LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
@@ -2613,7 +2690,14 @@ function getLogsByOrganization($organization_id, $date_from = null, $date_to = n
             LEFT JOIN devices d ON t.device_serial = d.serial_number
             LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                 AND t.date = al.punch_date AND t.time = al.punch_time
-            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
+            LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date AND t.organization_id = da.organization_id
+            LEFT JOIN (
+                SELECT user_id, punch_date,
+                       MIN(CASE WHEN punch_type = 'in'  THEN punch_time END) AS computed_punch_in,
+                       MAX(CASE WHEN punch_type = 'out' THEN punch_time END) AS computed_punch_out
+                FROM attendance_logs
+                GROUP BY user_id, punch_date
+            ) al_summary ON u.id = al_summary.user_id AND t.date = al_summary.punch_date
             $whereClause
             ORDER BY t.date DESC, t.time DESC
             LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
@@ -3031,7 +3115,16 @@ function getLogsByDevice($device_serial, $date_from = null, $date_to = null, $us
                        u.id as user_id, t.organization_id, u.name, o.name as organization_name, o.status as organization_status,
                        d.device_name, d.serial_number,
                        al.punch_type, al.is_late, al.is_early, al.is_auto_generated, al.notes,
-                       da.punch_in_time, da.punch_out_time, da.total_hours, da.status as daily_status,
+                       COALESCE(da.punch_in_time,  al_summary.computed_punch_in)  AS punch_in_time,
+                       COALESCE(da.punch_out_time, al_summary.computed_punch_out) AS punch_out_time,
+                       COALESCE(da.total_hours,
+                           CASE
+                               WHEN al_summary.computed_punch_in IS NOT NULL AND al_summary.computed_punch_out IS NOT NULL
+                               THEN ROUND(TIME_TO_SEC(TIMEDIFF(al_summary.computed_punch_out, al_summary.computed_punch_in)) / 3600, 2)
+                               ELSE NULL
+                           END
+                       ) AS total_hours,
+                       da.status AS daily_status,
                        da.late_minutes, da.early_out_minutes, da.overtime_hours
                 FROM tblt_timesheet t
                 LEFT JOIN users u ON t.punchingcode = u.punching_code AND t.organization_id = u.organization_id
@@ -3039,7 +3132,14 @@ function getLogsByDevice($device_serial, $date_from = null, $date_to = null, $us
                 LEFT JOIN devices d ON t.device_serial = d.serial_number
                 LEFT JOIN attendance_logs al ON t.punchingcode = al.punching_code
                     AND t.date = al.punch_date AND t.time = al.punch_time
-                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date
+                LEFT JOIN daily_attendance da ON u.id = da.user_id AND t.date = da.attendance_date AND t.organization_id = da.organization_id
+                LEFT JOIN (
+                    SELECT user_id, punch_date,
+                           MIN(CASE WHEN punch_type = \'in\'  THEN punch_time END) AS computed_punch_in,
+                           MAX(CASE WHEN punch_type = \'out\' THEN punch_time END) AS computed_punch_out
+                    FROM attendance_logs
+                    GROUP BY user_id, punch_date
+                ) al_summary ON u.id = al_summary.user_id AND t.date = al_summary.punch_date
                 WHERE t.Tid = ?';
 
         $params = [$device_serial];
@@ -4566,10 +4666,10 @@ function updateDailyAttendance($userId, $punchingCode, $organizationId, $date) {
         $stmt = $pdoConn->prepare("
             SELECT punch_type, punch_time, is_late, is_early
             FROM attendance_logs
-            WHERE user_id = ? AND punch_date = ?
+            WHERE user_id = ? AND punch_date = ? AND organization_id = ?
             ORDER BY punch_time ASC
         ");
-        $stmt->execute([$userId, $date]);
+        $stmt->execute([$userId, $date, $organizationId]);
         $punches = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $punchInTime = null;
@@ -4646,6 +4746,57 @@ function updateDailyAttendance($userId, $punchingCode, $organizationId, $date) {
     } catch (PDOException $e) {
         error_log("Database error in updateDailyAttendance: " . $e->getMessage());
         return false;
+    }
+}
+
+function backfillDailyAttendance() {
+    $pdoConn = getValidConnection();
+
+    try {
+        // Find all user+date+org combinations in attendance_logs that have no daily_attendance record
+        $stmt = $pdoConn->prepare("
+            SELECT al.user_id, al.punching_code, al.organization_id, al.punch_date
+            FROM attendance_logs al
+            LEFT JOIN daily_attendance da
+                ON al.user_id = da.user_id
+                AND al.punch_date = da.attendance_date
+                AND al.organization_id = da.organization_id
+            WHERE da.id IS NULL
+            GROUP BY al.user_id, al.punching_code, al.organization_id, al.punch_date
+            ORDER BY al.punch_date ASC
+        ");
+        $stmt->execute();
+        $missing = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $processed = 0;
+        $failed = 0;
+
+        foreach ($missing as $row) {
+            $result = updateDailyAttendance(
+                $row['user_id'],
+                $row['punching_code'],
+                $row['organization_id'],
+                $row['punch_date']
+            );
+            if ($result) {
+                $processed++;
+            } else {
+                $failed++;
+                error_log("backfillDailyAttendance failed for user_id={$row['user_id']}, org={$row['organization_id']}, date={$row['punch_date']}");
+            }
+        }
+
+        return [
+            'status' => 'success',
+            'message' => "Backfill complete",
+            'processed' => $processed,
+            'failed' => $failed,
+            'total_missing' => count($missing)
+        ];
+
+    } catch (PDOException $e) {
+        error_log("backfillDailyAttendance error: " . $e->getMessage());
+        return ['status' => 'error', 'message' => $e->getMessage()];
     }
 }
 
