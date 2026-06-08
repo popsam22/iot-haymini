@@ -81,8 +81,59 @@ try {
     $col = $stmt->fetch(PDO::FETCH_ASSOC);
     echo "  New: " . $col['Type'] . " DEFAULT " . $col['Default'] . "\n\n";
 
-    // Step 7: Post-migration counts
-    echo "Step 7: Post-migration row counts by status...\n";
+    // Step 7: Backfill missing daily_attendance rows from attendance_logs
+    // Punch records exist in attendance_logs but have no daily_attendance row,
+    // causing daily_status to appear null in API responses (COALESCE masks the missing row).
+    echo "Step 7: Backfilling missing daily_attendance rows from attendance_logs...\n";
+    $backfilled = $pdoConn->exec("
+        INSERT INTO daily_attendance
+            (user_id, punching_code, organization_id, attendance_date,
+             punch_in_time, punch_out_time, total_hours, status,
+             is_late, is_early_out, auto_generated)
+        SELECT
+            al.user_id, al.punching_code, al.organization_id, al.punch_date,
+            MIN(CASE WHEN al.punch_type = 'in'  THEN al.punch_time END),
+            MAX(CASE WHEN al.punch_type = 'out' THEN al.punch_time END),
+            CASE
+                WHEN MIN(CASE WHEN al.punch_type='in'  THEN al.punch_time END) IS NOT NULL
+                 AND MAX(CASE WHEN al.punch_type='out' THEN al.punch_time END) IS NOT NULL
+                THEN ROUND(TIME_TO_SEC(TIMEDIFF(
+                    MAX(CASE WHEN al.punch_type='out' THEN al.punch_time END),
+                    MIN(CASE WHEN al.punch_type='in'  THEN al.punch_time END)
+                )) / 3600, 2)
+                ELSE 0
+            END,
+            CASE
+                WHEN MIN(CASE WHEN al.punch_type='in'  THEN al.punch_time END) IS NOT NULL
+                 AND MAX(CASE WHEN al.punch_type='out' THEN al.punch_time END) IS NOT NULL
+                THEN 'present'
+                WHEN MIN(CASE WHEN al.punch_type='in'  THEN al.punch_time END) IS NOT NULL
+                  OR MAX(CASE WHEN al.punch_type='out' THEN al.punch_time END) IS NOT NULL
+                THEN 'partial'
+                ELSE 'absent'
+            END,
+            MAX(CASE WHEN al.punch_type='in'  THEN al.is_late  ELSE 0 END),
+            MAX(CASE WHEN al.punch_type='out' THEN al.is_early ELSE 0 END),
+            TRUE
+        FROM attendance_logs al
+        LEFT JOIN daily_attendance da
+            ON al.user_id = da.user_id
+            AND al.punch_date = da.attendance_date
+            AND al.organization_id = da.organization_id
+        WHERE da.id IS NULL
+        GROUP BY al.user_id, al.punching_code, al.organization_id, al.punch_date
+        ON DUPLICATE KEY UPDATE
+            punch_in_time  = VALUES(punch_in_time),
+            punch_out_time = VALUES(punch_out_time),
+            total_hours    = VALUES(total_hours),
+            status         = VALUES(status),
+            is_late        = VALUES(is_late),
+            is_early_out   = VALUES(is_early_out)
+    ");
+    echo "✓ Backfilled {$backfilled} row(s)\n\n";
+
+    // Step 8: Post-migration counts
+    echo "Step 8: Post-migration row counts by status...\n";
     $stmt = $pdoConn->query("SELECT IFNULL(status, 'NULL') as status, COUNT(*) as cnt FROM daily_attendance GROUP BY status");
     $after = $stmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($after as $row) {
