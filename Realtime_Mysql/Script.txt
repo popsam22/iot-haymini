@@ -120,7 +120,7 @@ CREATE TABLE daily_attendance (
     late_minutes INT DEFAULT 0,
     early_out_minutes INT DEFAULT 0,
     overtime_hours DECIMAL(5,2) DEFAULT 0,
-    status ENUM('present', 'absent', 'late', 'half_day', 'early_out') DEFAULT 'absent',
+    status ENUM('present', 'partial', 'absent') DEFAULT 'absent',
     auto_generated BOOLEAN DEFAULT FALSE,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

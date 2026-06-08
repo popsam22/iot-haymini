@@ -4713,9 +4713,9 @@ function updateDailyAttendance($userId, $punchingCode, $organizationId, $date) {
 
         if ($punchInTime && $punchOutTime) {
             $totalHours = (strtotime($punchOutTime) - strtotime($punchInTime)) / 3600;
-            $status = $isLate ? 'late' : ($isEarlyOut ? 'early_out' : 'present');
-        } elseif ($punchInTime) {
-            $status = 'half_day';
+            $status = 'present';
+        } elseif ($punchInTime || $punchOutTime) {
+            $status = 'partial';
         }
 
         // Insert or update daily attendance
@@ -4911,10 +4911,8 @@ function getOrganizationAttendance($organizationId, $dateFrom = null, $dateTo = 
         $stats = [
             'total_records' => count($attendance),
             'present' => 0,
-            'absent' => 0,
-            'late' => 0,
             'partial' => 0,
-            'early_out' => 0
+            'absent' => 0,
         ];
 
         foreach ($attendance as $record) {
@@ -4961,7 +4959,7 @@ function getUserAttendanceReport($userId, $dateFrom = null, $dateTo = null) {
         $totalHours = 0;
 
         foreach ($attendance as $record) {
-            if (in_array($record['status'], ['present', 'late', 'early_out'])) {
+            if (in_array($record['status'], ['present', 'partial'])) {
                 $presentDays++;
                 $totalHours += $record['total_hours'];
             }
