@@ -112,8 +112,8 @@ try {
                 THEN 'partial'
                 ELSE 'absent'
             END,
-            MAX(CASE WHEN al.punch_type='in'  THEN al.is_late  ELSE 0 END),
-            MAX(CASE WHEN al.punch_type='out' THEN al.is_early ELSE 0 END),
+            0,
+            0,
             TRUE
         FROM attendance_logs al
         LEFT JOIN daily_attendance da
