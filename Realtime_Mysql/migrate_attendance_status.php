@@ -88,8 +88,7 @@ try {
     $backfilled = $pdoConn->exec("
         INSERT INTO daily_attendance
             (user_id, punching_code, organization_id, attendance_date,
-             punch_in_time, punch_out_time, total_hours, status,
-             is_late, is_early_out, auto_generated)
+             punch_in_time, punch_out_time, total_hours, status)
         SELECT
             al.user_id, al.punching_code, al.organization_id, al.punch_date,
             MIN(CASE WHEN al.punch_type = 'in'  THEN al.punch_time END),
@@ -111,10 +110,7 @@ try {
                   OR MAX(CASE WHEN al.punch_type='out' THEN al.punch_time END) IS NOT NULL
                 THEN 'partial'
                 ELSE 'absent'
-            END,
-            0,
-            0,
-            TRUE
+            END
         FROM attendance_logs al
         LEFT JOIN daily_attendance da
             ON al.user_id = da.user_id
@@ -126,9 +122,7 @@ try {
             punch_in_time  = VALUES(punch_in_time),
             punch_out_time = VALUES(punch_out_time),
             total_hours    = VALUES(total_hours),
-            status         = VALUES(status),
-            is_late        = VALUES(is_late),
-            is_early_out   = VALUES(is_early_out)
+            status         = VALUES(status)
     ");
     echo "✓ Backfilled {$backfilled} row(s)\n\n";
 
