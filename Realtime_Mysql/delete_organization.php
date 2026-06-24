@@ -58,8 +58,8 @@ echo str_repeat('-', 50) . "\n";
 $dbName = $_ENV['MYSQL_DB'];
 
 $existingTables = $pdo->prepare(
-    'SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = "BASE TABLE"'
+    "SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'"
 );
 $existingTables->execute([$dbName]);
 $existing = array_flip($existingTables->fetchAll(PDO::FETCH_COLUMN));
